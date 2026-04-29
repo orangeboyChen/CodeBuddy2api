@@ -1,0 +1,12 @@
+services:
+  codebuddy2api:
+    build: .
+    image: sliverkiss/codebuddy2api:latest
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./config:/app/config
+      - ./.codebuddy_creds:/app/.codebuddy_creds
+    env_file:
+      - .env
