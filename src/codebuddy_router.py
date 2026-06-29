@@ -24,6 +24,7 @@ router = APIRouter()
 
 # --- 延迟加载配置常量 - 避免循环导入 ---
 _codebuddy_api_url: Optional[str] = None
+_codebuddy_responses_url: Optional[str] = None
 _available_models: Optional[List[str]] = None
 
 # 常见模型别名兼容：兼容部分客户端/用户习惯写法
@@ -41,6 +42,14 @@ def get_codebuddy_api_url() -> str:
         from config import get_codebuddy_api_endpoint
         _codebuddy_api_url = f"{get_codebuddy_api_endpoint()}/v2/chat/completions"
     return _codebuddy_api_url
+
+def get_codebuddy_responses_url() -> str:
+    """延迟加载 CodeBuddy Responses API URL（对应 tcodex 的 wire_api=responses，上游路径为 /responses）"""
+    global _codebuddy_responses_url
+    if _codebuddy_responses_url is None:
+        from config import get_codebuddy_api_endpoint
+        _codebuddy_responses_url = f"{get_codebuddy_api_endpoint()}/responses"
+    return _codebuddy_responses_url
 
 def get_available_models_list() -> List[str]:
     """延迟加载可用模型列表"""
@@ -704,6 +713,174 @@ class CredentialManager:
             logger.error(f"获取凭证失败: {e}")
             raise HTTPException(status_code=401, detail="凭证获取失败")
 
+# --- Responses API 支持（OpenAI Responses API 兼容，对齐 tcodex 的 wire_api=responses） ---
+
+class ResponsesProcessor:
+    """Responses API 请求预处理器"""
+
+    @staticmethod
+    def prepare_payload(request_body: Dict[str, Any]) -> Dict[str, Any]:
+        """准备 Responses API 请求载荷。
+
+        CodeBuddy 上游仅支持流式响应，因此始终以 stream=True 调用上游，
+        非流式请求在本服务内部聚合为单个 Response 对象返回。
+        """
+        payload = request_body.copy()
+        payload["stream"] = True  # 上游强制流式
+
+        # 模型名标准化：将常见别名映射为上游真实模型ID
+        model = payload.get("model")
+        if isinstance(model, str):
+            mapped_model = MODEL_ALIASES.get(model.strip().lower())
+            if mapped_model:
+                payload["model"] = mapped_model
+
+        # 对 instructions（系统提示）应用关键词替换
+        instructions = payload.get("instructions")
+        if isinstance(instructions, str) and instructions:
+            payload["instructions"] = apply_keyword_replacement_to_system_message(instructions)
+
+        return payload
+
+    @staticmethod
+    def validate_request(request_body: Dict[str, Any]) -> None:
+        """验证 Responses API 请求参数"""
+        if not isinstance(request_body, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object")
+
+        # Responses API 使用 input（字符串或数组）；兼容部分客户端传入 messages
+        if "input" not in request_body and "messages" not in request_body:
+            raise HTTPException(
+                status_code=400,
+                detail="Field 'input' is required for the Responses API"
+            )
+
+
+class CodeBuddyResponsesService:
+    """CodeBuddy Responses API 服务类 - 转发到上游 /responses 接口"""
+
+    def __init__(self):
+        self.connection_manager = SSEConnectionManager(max_retries=3, retry_delay=1.0)
+
+    def _handle_api_error(self, status_code: int, error_msg: str) -> None:
+        """统一的API错误处理 - 直接抛出异常"""
+        logger.error(f"CodeBuddy Responses API错误: {status_code} - {error_msg}")
+
+        if status_code == 401:
+            raise HTTPException(status_code=401, detail="CodeBuddy API authentication failed")
+        elif status_code == 429:
+            raise HTTPException(status_code=429, detail="CodeBuddy API rate limit exceeded")
+        elif status_code >= 500:
+            raise HTTPException(status_code=502, detail="CodeBuddy API server error")
+        else:
+            raise HTTPException(status_code=status_code, detail=f"CodeBuddy API error: {error_msg}")
+
+    async def handle_stream_response(self, payload: Dict[str, Any], headers: Dict[str, str]) -> StreamingResponse:
+        """处理流式响应 - 直接透传上游 Responses API 的 SSE 事件流"""
+        async def stream_core():
+            client = await get_http_client()
+            async with client.stream("POST", get_codebuddy_responses_url(), json=payload, headers=headers) as response:
+                if response.status_code != 200:
+                    error_text = await response.aread()
+                    error_msg = error_text.decode('utf-8', errors='ignore')
+                    yield format_sse_error(
+                        f"CodeBuddy Responses API error: {response.status_code} - {error_msg}",
+                        "api_error"
+                    )
+                    return
+
+                # Responses API 的事件包含 event: 与 data: 行，需保留原始帧结构，直接透传字节
+                async for chunk in response.aiter_bytes():
+                    if chunk:
+                        yield chunk
+
+        async def stream_with_retry():
+            async for chunk in self.connection_manager.stream_with_retry(stream_core):
+                yield chunk
+
+        return StreamingResponse(stream_with_retry(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+    async def handle_non_stream_response(self, payload: Dict[str, Any], headers: Dict[str, str]) -> Dict[str, Any]:
+        """处理非流式响应 - 读取上游事件流并聚合为单个 Response 对象"""
+        try:
+            client = await get_http_client()
+            response = await client.post(get_codebuddy_responses_url(), json=payload, headers=headers)
+
+            if response.status_code != 200:
+                self._handle_api_error(response.status_code, response.text)
+
+            final_response: Optional[Dict[str, Any]] = None
+            accumulated_text = ""
+            buffer = ""
+
+            def _consume(obj: Dict[str, Any]):
+                nonlocal final_response, accumulated_text
+                if not isinstance(obj, dict):
+                    return
+                ev_type = obj.get("type")
+                # response.completed / failed / incomplete 事件直接包含完整 response 对象
+                if ev_type in ("response.completed", "response.failed", "response.incomplete"):
+                    resp_obj = obj.get("response")
+                    if isinstance(resp_obj, dict):
+                        final_response = resp_obj
+                # 累积文本增量，作为兜底（当无 completed 事件时）
+                elif ev_type == "response.output_text.delta":
+                    delta = obj.get("delta")
+                    if isinstance(delta, str):
+                        accumulated_text += delta
+
+            async for chunk in response.aiter_text():
+                if not chunk:
+                    continue
+                buffer += chunk
+                while '\n' in buffer:
+                    line, buffer = buffer.split('\n', 1)
+                    obj = parse_sse_line(line)
+                    if obj:
+                        _consume(obj)
+
+            if buffer.strip():
+                obj = parse_sse_line(buffer.strip())
+                if obj:
+                    _consume(obj)
+
+            if final_response is not None:
+                return final_response
+
+            # 兜底：未捕获到 completed 事件时，根据累积文本构造最简 Response 对象
+            return {
+                "id": f"resp_{uuid.uuid4().hex}",
+                "object": "response",
+                "created_at": int(time.time()),
+                "model": payload.get("model", "unknown"),
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "id": f"msg_{uuid.uuid4().hex}",
+                        "status": "completed",
+                        "role": "assistant",
+                        "content": [
+                            {"type": "output_text", "text": accumulated_text, "annotations": []}
+                        ]
+                    }
+                ],
+                "output_text": accumulated_text
+            }
+
+        except httpx.TimeoutException:
+            logger.error("CodeBuddy Responses API 超时")
+            raise HTTPException(status_code=504, detail="CodeBuddy API timeout")
+        except httpx.NetworkError as e:
+            logger.error(f"网络错误: {e}")
+            raise HTTPException(status_code=502, detail=f"Network error: {str(e)}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Responses 请求异常: {e}")
+            raise HTTPException(status_code=500, detail=f"Request error: {str(e)}")
+
+
 # --- API Endpoints ---
 
 @router.post("/v1/chat/completions")
@@ -757,6 +934,64 @@ async def chat_completions(
         raise
     except Exception as e:
         logger.error(f"CodeBuddy V1 API错误: {e}")
+        raise HTTPException(status_code=500, detail=f"内部服务器错误: {str(e)}")
+
+@router.post("/v1/responses")
+async def responses(
+    request: Request,
+    x_conversation_id: Optional[str] = Header(None, alias="X-Conversation-ID"),
+    x_conversation_request_id: Optional[str] = Header(None, alias="X-Conversation-Request-ID"),
+    x_conversation_message_id: Optional[str] = Header(None, alias="X-Conversation-Message-ID"),
+    x_request_id: Optional[str] = Header(None, alias="X-Request-ID"),
+    _token: str = Depends(authenticate)
+):
+    """CodeBuddy Responses API - 兼容 OpenAI Responses API（/v1/responses）
+
+    转发到上游 `{endpoint}/responses`（与 tcodex 的 wire_api=responses 一致）。
+    - 客户端 stream=true：直接透传上游 SSE 事件流。
+    - 客户端 stream=false：内部以流式请求上游并聚合为单个 Response 对象返回。
+    """
+    try:
+        # 解析请求体
+        try:
+            request_body = await request.json()
+        except Exception as e:
+            logger.error(f"解析请求体失败: {e}")
+            raise HTTPException(status_code=400, detail=f"Invalid JSON request body: {str(e)}")
+
+        # 验证请求参数
+        ResponsesProcessor.validate_request(request_body)
+
+        # 获取认证信息（API Key 或 Token）
+        auth_context = CredentialManager.get_auth_context()
+
+        # 生成请求头
+        headers = codebuddy_api_client.generate_codebuddy_headers(
+            auth=auth_context,
+            user_id=auth_context.get('user_id'),
+            conversation_id=x_conversation_id,
+            conversation_request_id=x_conversation_request_id,
+            conversation_message_id=x_conversation_message_id,
+            request_id=x_request_id
+        )
+
+        # 预处理请求（上游强制流式）
+        payload = ResponsesProcessor.prepare_payload(request_body)
+        usage_stats_manager.record_model_usage(payload.get("model", "unknown"))
+
+        # 使用 Responses 服务类处理请求
+        service = CodeBuddyResponsesService()
+        client_wants_stream = request_body.get("stream", False)
+
+        if client_wants_stream:
+            return await service.handle_stream_response(payload, headers)
+        else:
+            return await service.handle_non_stream_response(payload, headers)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"CodeBuddy Responses API错误: {e}")
         raise HTTPException(status_code=500, detail=f"内部服务器错误: {str(e)}")
 
 @router.get("/v1/models")

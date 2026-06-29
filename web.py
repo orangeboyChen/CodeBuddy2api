@@ -109,6 +109,7 @@ async def root():
         "endpoints": {
             "models": "/codebuddy/v1/models",
             "chat": "/codebuddy/v1/chat/completions",
+            "responses": "/codebuddy/v1/responses",
             "credentials": "/codebuddy/v1/credentials",
             "auth_start": "/codebuddy/auth/start",
             "auth_poll": "/codebuddy/auth/poll",
@@ -137,6 +138,7 @@ if __name__ == "__main__":
     logger.info("API Endpoints:")
     logger.info(f"   Models: GET http://{host}:{port}/codebuddy/v1/models")
     logger.info(f"   Chat: POST http://{host}:{port}/codebuddy/v1/chat/completions")
+    logger.info(f"   Responses: POST http://{host}:{port}/codebuddy/v1/responses")
     logger.info(f"   Credentials: GET http://{host}:{port}/codebuddy/v1/credentials")
     logger.info("=" * 60)
     logger.info("Authentication:")

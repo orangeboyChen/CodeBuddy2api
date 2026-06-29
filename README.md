@@ -6,7 +6,7 @@
 
 ## 🌟 功能特性
 
-- 🔌 **OpenAI 兼容接口**：支持标准的 `/v1/chat/completions` API，无缝对接现有生态。
+- 🔌 **OpenAI 兼容接口**：支持标准的 `/v1/chat/completions` 与 `/v1/responses`（OpenAI Responses API）两套接口，无缝对接现有生态。
 - 🔄 **智能响应处理**：即使 CodeBuddy 原生仅支持流式响应，本服务也能为客户端智能处理**非流式**请求，并在后端自动完成“流式转非流式”的响应包装。
 - ⚡ **高性能**：完全基于 FastAPI 和 `asyncio` 构建，支持高并发异步请求。
 - 🔐 **双重认证机制**：
@@ -168,9 +168,65 @@ curl -X POST "http://127.0.0.1:8001/codebuddy/v1/chat/completions" \
   }'
 ```
 
+### Responses API（`/v1/responses`）
+
+除了 `chat/completions`，本服务还兼容 **OpenAI Responses API**（请求转发到 CodeBuddy 上游的 `/responses` 接口，与官方 tcodex CLI 的 `wire_api=responses` 一致）。
+
+**curl 非流式请求:**
+```bash
+curl -X POST "http://127.0.0.1:8001/codebuddy/v1/responses" \
+  -H "Authorization: Bearer your_secret_password_for_this_service" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-5.5",
+    "instructions": "You are a helpful coding assistant.",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          { "type": "input_text", "text": "用 Python 写一个快速排序函数" }
+        ]
+      }
+    ]
+  }'
+```
+
+**curl 流式请求:**
+```bash
+curl -N -X POST "http://127.0.0.1:8001/codebuddy/v1/responses" \
+  -H "Authorization: Bearer your_secret_password_for_this_service" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-5.5",
+    "input": "写一个 Python Hello World 脚本",
+    "stream": true
+  }'
+```
+
+**Python (openai SDK):**
+```python
+import openai
+
+client = openai.OpenAI(
+    api_key="your_secret_password_for_this_service",
+    base_url="http://127.0.0.1:8001/codebuddy/v1"
+)
+
+resp = client.responses.create(
+    model="gpt-5.5",
+    input="你好，2+2 等于几？"
+)
+print(resp.output_text)
+```
+
+> 说明：
+> - 客户端 `stream=true` 时，本服务直接透传上游 Responses API 的 SSE 事件流（`response.created` / `response.output_text.delta` / `response.completed` 等）。
+> - 客户端 `stream=false` 时，本服务在后端以流式请求上游并聚合为单个 Response 对象返回。
+
 ## 📝 API 端点
 
-- `POST /codebuddy/v1/chat/completions`: 核心接口，用于发送聊天请求。
+- `POST /codebuddy/v1/chat/completions`: 聊天接口（Chat Completions）。
+- `POST /codebuddy/v1/responses`: Responses 接口（OpenAI Responses API），转发到上游 `/responses`。
 - `GET /codebuddy/v1/models`: 获取在 `.env` 文件中配置的模型列表。
 - `GET /codebuddy/v1/credentials`: （需要认证）在 Web UI 中用于列出所有凭证。
 - `POST /codebuddy/v1/credentials`: （需要认证）在 Web UI 中用于添加新凭证。
