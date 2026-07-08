@@ -1,20 +1,18 @@
 # CodeBuddy2API
 
-Wrap Tencent CodeBuddy (Copilot) official APIs with an OpenAI-compatible proxy so any standard OpenAI client can talk to CodeBuddy through a unified interface.
+Wrap CodeBuddy APIs with an OpenAI-compatible proxy so any standard OpenAI client can talk to CodeBuddy through a unified interface.
 
-> For one-command Docker Compose deployment, see [USAGE.md](./USAGE.md).
+## Features
 
-## 🌟 Features
+- **OpenAI-compatible API**: Exposes standard `/v1/*` endpoints and works with the `openai` SDK plus many third-party clients.
+- **Dual API support**: Supports both `Chat Completions` (`/v1/chat/completions`) and `Responses` (`/v1/responses`, OpenAI Responses API).
+- **Smart response handling**: Even if the upstream CodeBuddy API only supports streaming, this service can aggregate the stream on the backend for non-streaming requests.
+- **Web-based authentication**: Supports obtaining a Bearer Token through an OAuth flow, with one-click authorization from the Web admin UI and no need to manually copy tokens.
+- **Automatic credential rotation**: Supports multiple credentials in the `.codebuddy_creds` directory, rotates them automatically based on `CODEBUDDY_ROTATION_COUNT`, and also allows manual selection or disabling rotation in the Web UI.
+- **Web admin UI**: Built-in admin panel for credential management, API testing, service status, and hot-reloadable settings.
+- **High performance**: Built with FastAPI + asyncio + Hypercorn for high-concurrency asynchronous requests.
 
-- 🔌 **OpenAI-compatible API**: Exposes standard `/v1/*` endpoints and works with the `openai` SDK plus many third-party clients.
-- 💬 **Dual API support**: Supports both `Chat Completions` (`/v1/chat/completions`) and `Responses` (`/v1/responses`, OpenAI Responses API).
-- 🔄 **Smart response handling**: Even if the upstream CodeBuddy API only supports streaming, this service can aggregate the stream on the backend for non-streaming requests.
-- 🔐 **Web-based authentication**: Supports obtaining a Bearer Token through an OAuth flow, with one-click authorization from the Web admin UI and no need to manually copy tokens.
-- 🔄 **Automatic credential rotation**: Supports multiple credentials in the `.codebuddy_creds` directory, rotates them automatically based on `CODEBUDDY_ROTATION_COUNT`, and also allows manual selection or disabling rotation in the Web UI.
-- 🌐 **Web admin UI**: Built-in admin panel for credential management, API testing, service status, and hot-reloadable settings.
-- ⚡ **High performance**: Built with FastAPI + asyncio + Hypercorn for high-concurrency asynchronous requests.
-
-## 🚀 Quick Start
+## Quick Start
 
 The default configuration already includes sensible values. In most cases, you only need to complete one web login flow after startup.
 
@@ -64,7 +62,7 @@ This service can obtain a CodeBuddy Bearer Token through an OAuth flow. The reco
 
 > The default polling interval is 5 seconds. The auth state remains valid for 1800 seconds (30 minutes). Credential files are stored as JSON under `.codebuddy_creds/`. Once this step is complete, you can start calling the API.
 
-## ⚙️ API Usage
+## API Usage
 
 ### Client Integration Examples
 
@@ -140,7 +138,7 @@ print(resp.output_text)
 > - When `stream=true`, the upstream SSE event stream is passed through directly (`response.created`, `response.output_text.delta`, `response.completed`, and so on).
 > - When `stream=false`, the backend still sends a streaming request upstream and aggregates the result into a single Response object before returning it.
 
-## 📝 API Endpoints
+## API Endpoints
 
 To stay compatible with standard OpenAI clients, all of the following endpoints use the `/v1/*` path prefix:
 
@@ -160,7 +158,7 @@ To stay compatible with standard OpenAI clients, all of the following endpoints 
 - `GET /health`: Health check endpoint.
 - `GET /api/settings` / `POST /api/settings`: Read and save service settings with hot reload.
 
-## 🔧 Project Structure
+## Project Structure
 
 ```text
 CodeBuddy2api/
@@ -188,7 +186,7 @@ CodeBuddy2api/
 └── README.md                      # This document
 ```
 
-## ⚙️ Configuration
+## Configuration
 
 All settings can be adjusted through environment variables or from the **Settings** page in the Web admin UI. Changes take effect immediately and are persisted to `config/config.json`.
 
@@ -207,13 +205,13 @@ Web UI in-memory hot updates > `config/config.json` > environment variables / `.
 | `CODEBUDDY_MODELS` | built-in model list | Comma-separated list of models reported to clients. |
 | `CODEBUDDY_ROTATION_COUNT` | `1` | Rotate to the next credential every N requests. Set to `0` to disable automatic rotation. |
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 - **"No valid CodeBuddy credentials found"**: Web authentication has not been completed yet, or there is no valid credential JSON file under `.codebuddy_creds/`. In the Web UI credential management page, click **Start Authentication** and finish the login flow.
 - **"API error: 401" / "API error: 403" (from CodeBuddy)**: The Bearer Token is invalid or expired. Log in again to obtain a new credential, or delete the expired credential and re-authenticate.
 - **Authentication link cannot be opened / login timed out**: Make sure your environment can reach `https://copilot.tencent.com`. The auth state is valid for 30 minutes; after it expires, click **Start Authentication** again.
 - **Need detailed logs**: Change `CODEBUDDY_LOG_LEVEL` to `DEBUG` in the Web UI settings page, or set the environment variable and restart the service.
 
-## 📄 License
+## License
 
 See [LICENSE](./LICENSE) for details.
