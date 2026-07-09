@@ -12,6 +12,8 @@ import { recordModelUsage } from './stats';
 interface OpenAIMessage {
   role?: string;
   content?: unknown;
+  tool_calls?: unknown[];
+  tool_call_id?: string;
 }
 
 interface ChatRequestBody {
@@ -99,13 +101,9 @@ const normalizeMessages = (messages: OpenAIMessage[]): OpenAIMessage[] => {
     ];
   }
 
-  return filtered.map((item) => {
-    if (item.role === 'tool') {
-      return { ...item, role: 'user' };
-    }
-
-    return item;
-  });
+  // Preserve role:'tool' messages so the OpenAI-compatible upstream
+  // receives a valid tool_calls/tool-result pair for multi-step tool loops.
+  return filtered;
 };
 
 const getResolvedAuth = (): ResolvedAuth => {

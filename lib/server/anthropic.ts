@@ -507,7 +507,9 @@ const mapOpenAIStreamToAnthropicSSE = (
   let nextToolIndex = 0;
   let started = false;
   let thinkingStarted = false;
+  let thinkingBlockIndex = -1;
   let textStarted = false;
+  let textBlockIndex = -1;
   // Tracks how many content blocks (thinking + text) have been opened
   // so tool_use blocks get correct sequential indices even after the
   // prior blocks are closed mid-stream.
@@ -532,16 +534,15 @@ const mapOpenAIStreamToAnthropicSSE = (
     if (thinkingStarted) {
       enqueueEvent({
         type: 'content_block_stop',
-        index: 0,
+        index: thinkingBlockIndex,
       });
       thinkingStarted = false;
     }
 
     if (textStarted) {
-      const textIndex = 0;
       enqueueEvent({
         type: 'content_block_stop',
-        index: textIndex,
+        index: textBlockIndex,
       });
       textStarted = false;
     }
@@ -586,10 +587,11 @@ const mapOpenAIStreamToAnthropicSSE = (
 
     if (reasoningText) {
       if (!thinkingStarted) {
+        thinkingBlockIndex = contentBlockCount;
         thinkingStarted = true;
         enqueueEvent({
           type: 'content_block_start',
-          index: contentBlockCount,
+          index: thinkingBlockIndex,
           content_block: {
             type: 'thinking',
             thinking: '',
@@ -600,7 +602,7 @@ const mapOpenAIStreamToAnthropicSSE = (
 
       enqueueEvent({
         type: 'content_block_delta',
-        index: 0,
+        index: thinkingBlockIndex,
         delta: {
           type: 'thinking_delta',
           thinking: reasoningText,
@@ -611,11 +613,15 @@ const mapOpenAIStreamToAnthropicSSE = (
     // Text content
     if (delta.content) {
       if (!textStarted) {
-        const textIndex = contentBlockCount;
+        // Close the thinking block before starting text so Anthropic
+        // stream consumers see properly ordered, non-overlapping blocks.
+        closeOpenTextBlocks();
+
+        textBlockIndex = contentBlockCount;
         textStarted = true;
         enqueueEvent({
           type: 'content_block_start',
-          index: textIndex,
+          index: textBlockIndex,
           content_block: {
             type: 'text',
             text: '',
@@ -624,10 +630,9 @@ const mapOpenAIStreamToAnthropicSSE = (
         contentBlockCount++;
       }
 
-      const textIndex = contentBlockCount - 1;
       enqueueEvent({
         type: 'content_block_delta',
-        index: textIndex,
+        index: textBlockIndex,
         delta: {
           type: 'text_delta',
           text: delta.content,
