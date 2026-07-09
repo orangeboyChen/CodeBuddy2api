@@ -3,7 +3,10 @@ import path from 'node:path';
 
 import { NextRequest } from 'next/server';
 
-import { getAuthErrorResponse } from '@/lib/server/auth';
+import {
+  getAnthropicAuthErrorResponse,
+  getAuthErrorResponse,
+} from '@/lib/server/auth';
 import {
   getAuthCallbackResponse,
   pollCodeBuddyAuth,
@@ -101,6 +104,51 @@ describe('server units', () => {
       getAuthErrorResponse(
         makeNextRequest('http://localhost/test', {
           headers: { authorization: 'Bearer secret' },
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it('covers anthropic auth with x-api-key and bearer', async () => {
+    // No password configured — both pass.
+    expect(
+      getAnthropicAuthErrorResponse(
+        makeNextRequest('http://localhost/v1/messages'),
+      ),
+    ).toBeNull();
+
+    process.env.CODEBUDDY_PASSWORD = 'anthropic-secret';
+
+    // Missing key entirely.
+    const noKey = getAnthropicAuthErrorResponse(
+      makeNextRequest('http://localhost/v1/messages'),
+    );
+    expect(noKey?.status).toBe(401);
+    expect((await noKey!.json()).type).toBe('error');
+
+    // Wrong key via x-api-key.
+    expect(
+      getAnthropicAuthErrorResponse(
+        makeNextRequest('http://localhost/v1/messages', {
+          headers: { 'x-api-key': 'wrong' },
+        }),
+      )?.status,
+    ).toBe(403);
+
+    // Correct key via x-api-key.
+    expect(
+      getAnthropicAuthErrorResponse(
+        makeNextRequest('http://localhost/v1/messages', {
+          headers: { 'x-api-key': 'anthropic-secret' },
+        }),
+      ),
+    ).toBeNull();
+
+    // Correct key via Authorization: Bearer.
+    expect(
+      getAnthropicAuthErrorResponse(
+        makeNextRequest('http://localhost/v1/messages', {
+          headers: { authorization: 'Bearer anthropic-secret' },
         }),
       ),
     ).toBeNull();
