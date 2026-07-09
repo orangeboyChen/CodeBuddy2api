@@ -28,6 +28,8 @@ interface ChatRequestBody {
   stop?: string | string[];
   tools?: unknown[];
   tool_choice?: unknown;
+  thinking?: Record<string, unknown>;
+  reasoning_effort?: string;
 }
 
 interface ChatStreamDelta {
@@ -278,6 +280,8 @@ const buildUpstreamBody = (body: ChatRequestBody): ChatRequestBody => {
     stop: body.stop,
     tools: body.tools,
     tool_choice: body.tool_choice,
+    thinking: body.thinking,
+    reasoning_effort: body.reasoning_effort,
   };
 };
 
