@@ -945,8 +945,9 @@ describe('server units', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response(
         'event: ping\n\n' +
-          'data: {"choices":[{"delta":{"tool_calls":[{"type":"function","function":{"name":"mcp_","arguments":"{\\"query\\":\\""}}]}}]}\n\n' +
-          'data: {"choices":[{"delta":{"reasoning_content":"thinking","tool_calls":[{"function":{"name":"tool","arguments":"docs\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n' +
+          'data: {"choices":[{"delta":{"tool_calls":[{"id":"call_docs","index":0}]}}]}\n\n' +
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"type":"function","function":{"name":"mcp_","arguments":"{\\"query\\":\\""}}]}}]}\n\n' +
+          'data: {"choices":[{"delta":{"reasoning_content":"thinking","tool_calls":[{"index":0,"function":{"name":"tool","arguments":"docs\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n' +
           'data: [DONE]\n\n',
         {
           status: 200,
@@ -983,6 +984,7 @@ describe('server units', () => {
     expect(streamText).toContain('"server_label":"docs-svc"');
     expect(streamText).toContain('response.function_call_arguments.delta');
     expect(streamText).toContain('"arguments":"{\\"query\\":\\"docs\\"}"');
+    expect(streamText).not.toContain('"name":"function"');
   });
 
   it('covers auth api fallback branches', async () => {
@@ -1379,11 +1381,21 @@ describe('server units', () => {
         tool_choice: { type: 'file_search', name: 'search_files' },
       },
     );
+    const requiredUnsupportedToolsResponse = await handleResponsesRequest(
+      makeNextRequest('http://localhost/v1/responses', { method: 'POST' }),
+      {
+        input: 'require unsupported tools',
+        model: 'gpt-5.5',
+        tools: [{ type: 'file_search' }],
+        tool_choice: { type: 'required' },
+      },
+    );
 
     expect(mcpToolsResponse.status).toBe(200);
     expect(mcpChoiceResponse.status).toBe(200);
     expect(invalidChoiceResponse.status).toBe(400);
     expect(missingToolChoiceResponse.status).toBe(400);
+    expect(requiredUnsupportedToolsResponse.status).toBe(400);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 

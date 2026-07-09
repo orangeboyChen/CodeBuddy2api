@@ -382,6 +382,8 @@ const getResponsesCompatibilityError = (
   tools: ResponsesRequestBody['tools'],
   toolChoice: unknown,
 ): Response | null => {
+  const supportedTools = filterSupportedTools(tools);
+
   if (typeof toolChoice === 'object' && toolChoice !== null) {
     const choice = toolChoice as Record<string, unknown>;
     const isPretranslatedFunctionChoice =
@@ -404,11 +406,17 @@ const getResponsesCompatibilityError = (
         'Unsupported Responses tool_choice for this /v1/responses adapter',
       );
     }
+
+    if (choice.type === 'required' && supportedTools.length === 0) {
+      return createErrorResponse(
+        400,
+        'tool_choice=required requires at least one supported tool for this /v1/responses adapter',
+      );
+    }
   }
 
   const namedToolChoice = getNamedToolChoice(toolChoice);
   if (namedToolChoice) {
-    const supportedTools = filterSupportedTools(tools);
     const supportedNames = new Set(
       supportedTools
         .map((tool) => extractFunctionDefinition(tool)?.name)
@@ -658,20 +666,26 @@ const createResponsesEventStream = async (
 
       const maybeEmitToolCallAdded = (
         toolCallState: StreamingToolCallState,
+        allowIncompleteName = false,
       ): void => {
         if (toolCallState.addedEmitted) {
           return;
         }
 
+        const shouldWaitForInitialName =
+          !allowIncompleteName &&
+          Boolean(defaults.tools?.length) &&
+          toolCallState.name.length === 0;
         const hasExactMatch =
           findSupportedToolByName(defaults.tools, toolCallState.name) !== null;
         const shouldWaitForMoreName =
+          !allowIncompleteName &&
           defaults.tools?.length &&
           toolCallState.name.length > 0 &&
           !hasExactMatch &&
           hasSupportedToolNamePrefix(defaults.tools, toolCallState.name);
 
-        if (shouldWaitForMoreName) {
+        if (shouldWaitForInitialName || shouldWaitForMoreName) {
           return;
         }
 
@@ -728,7 +742,7 @@ const createResponsesEventStream = async (
             defaults,
           });
           [...toolCallStates.values()].forEach((toolCallState) => {
-            maybeEmitToolCallAdded(toolCallState);
+            maybeEmitToolCallAdded(toolCallState, true);
             enqueueEvent({
               type: 'response.output_item.done',
               item: buildResponsesToolCallOutputItem(defaults.tools, {
