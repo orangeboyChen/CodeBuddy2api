@@ -205,6 +205,51 @@ const buildResponsesToolCallOutputItem = (
   return item;
 };
 
+const getResponsesToolCallArgumentDeltaEventType = (
+  tools: ResponsesRequestBody['tools'],
+  name: string,
+):
+  | 'response.function_call_arguments.delta'
+  | 'response.mcp_call_arguments.delta' => {
+  return findSupportedToolByName(tools, name)?.type === 'mcp'
+    ? 'response.mcp_call_arguments.delta'
+    : 'response.function_call_arguments.delta';
+};
+
+const buildAssistantTranscriptToolCalls = (
+  toolCalls: ChatResponseToolCall[],
+): TranscriptMessage['tool_calls'] | undefined => {
+  if (!toolCalls.length) {
+    return undefined;
+  }
+
+  return toolCalls.map((toolCall, index) => ({
+    id: normalizeToolCallId(toolCall.id, index),
+    type: 'function',
+    function: {
+      name: toolCall.function?.name ?? 'function',
+      arguments: toolCall.function?.arguments ?? '',
+    },
+  }));
+};
+
+const buildStreamingAssistantTranscriptToolCalls = (
+  toolCallStates: StreamingToolCallState[],
+): TranscriptMessage['tool_calls'] | undefined => {
+  if (!toolCallStates.length) {
+    return undefined;
+  }
+
+  return toolCallStates.map((toolCallState) => ({
+    id: toolCallState.callId,
+    type: 'function',
+    function: {
+      arguments: toolCallState.arguments,
+      name: toolCallState.name,
+    },
+  }));
+};
+
 const stringifyContent = (value: unknown): string => {
   if (typeof value === 'string') {
     return value;
@@ -549,6 +594,7 @@ const mapChatResponseToResponsesPayload = (
   const outputText = stringifyContent(firstChoice.message?.content);
   const createdAt = Math.floor(Date.now() / 1000);
   const output: Array<Record<string, unknown>> = [];
+  const transcriptToolCalls = buildAssistantTranscriptToolCalls(toolCalls);
 
   if (outputText || !toolCalls.length) {
     output.push({
@@ -586,14 +632,7 @@ const mapChatResponseToResponsesPayload = (
       {
         role: 'assistant',
         content: outputText || null,
-        tool_calls: toolCalls.map((toolCall, index) => ({
-          id: normalizeToolCallId(toolCall.id, index),
-          type: 'function',
-          function: {
-            name: toolCall.function?.name ?? 'function',
-            arguments: toolCall.function?.arguments ?? '',
-          },
-        })),
+        ...(transcriptToolCalls ? { tool_calls: transcriptToolCalls } : {}),
       },
     ],
     defaults,
@@ -713,7 +752,10 @@ const createResponsesEventStream = async (
         toolCallState.addedEmitted = true;
         toolCallState.pendingArgumentDeltas.forEach((delta) => {
           enqueueEvent({
-            type: 'response.function_call_arguments.delta',
+            type: getResponsesToolCallArgumentDeltaEventType(
+              defaults.tools,
+              toolCallState.name,
+            ),
             delta,
             item_id: toolCallState.outputItemId,
             output_index: toolCallState.outputIndex,
@@ -727,6 +769,10 @@ const createResponsesEventStream = async (
         const { done, value } = await reader.read();
 
         if (done) {
+          const transcriptToolCalls =
+            buildStreamingAssistantTranscriptToolCalls([
+              ...toolCallStates.values(),
+            ]);
           getSessionStore().set(responseId, {
             id: responseId,
             model,
@@ -735,16 +781,9 @@ const createResponsesEventStream = async (
               {
                 role: 'assistant',
                 content: outputText || null,
-                tool_calls: [...toolCallStates.values()].map(
-                  (toolCallState) => ({
-                    id: toolCallState.callId,
-                    type: 'function',
-                    function: {
-                      arguments: toolCallState.arguments,
-                      name: toolCallState.name,
-                    },
-                  }),
-                ),
+                ...(transcriptToolCalls
+                  ? { tool_calls: transcriptToolCalls }
+                  : {}),
               },
             ],
             defaults,
@@ -860,7 +899,10 @@ const createResponsesEventStream = async (
                 current.arguments += toolCall.function.arguments;
                 if (current.addedEmitted) {
                   enqueueEvent({
-                    type: 'response.function_call_arguments.delta',
+                    type: getResponsesToolCallArgumentDeltaEventType(
+                      defaults.tools,
+                      current.name,
+                    ),
                     delta: toolCall.function.arguments,
                     item_id: current.outputItemId,
                     output_index: current.outputIndex,

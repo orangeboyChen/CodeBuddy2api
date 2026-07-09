@@ -494,9 +494,17 @@ describe('server runtime', () => {
         .messages[0].content,
     ).toBe('Keep replies brief');
     expect(
+      JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body))
+        .messages[1].tool_calls,
+    ).toBeUndefined();
+    expect(
       JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body))
         .messages[0].content,
     ).toBe('Keep replies brief');
+    expect(
+      JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body))
+        .messages[1].tool_calls,
+    ).toBeUndefined();
 
     // Built-in tool types are flattened into chat-completions function tools
     // when they carry callable function metadata. Pure placeholders without

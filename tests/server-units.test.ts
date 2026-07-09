@@ -982,7 +982,8 @@ describe('server units', () => {
     expect(streamText).toContain('response.reasoning_text.delta');
     expect(streamText).toContain('"type":"mcp_call"');
     expect(streamText).toContain('"server_label":"docs-svc"');
-    expect(streamText).toContain('response.function_call_arguments.delta');
+    expect(streamText).toContain('response.mcp_call_arguments.delta');
+    expect(streamText).not.toContain('response.function_call_arguments.delta');
     expect(streamText).toContain('"arguments":"{\\"query\\":\\"docs\\"}"');
     expect(streamText).not.toContain('"name":"function"');
   });
