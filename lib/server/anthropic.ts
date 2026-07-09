@@ -366,11 +366,17 @@ const buildChatRequestBody = (
 const mapOpenAIUsageToAnthropic = (
   usage: OpenAIUsage | undefined,
 ): Record<string, number> => {
-  const inputTokens = usage?.prompt_tokens ?? 0;
-  const outputTokens = usage?.completion_tokens ?? 0;
   const cacheCreationTokens =
     usage?.prompt_tokens_details?.cache_creation_tokens ?? 0;
   const cacheReadTokens = usage?.prompt_tokens_details?.cached_tokens ?? 0;
+  // prompt_tokens is the total prompt count including cached tokens.
+  // Anthropic reports cached/created tokens separately, so input_tokens
+  // must be the non-cache remainder to avoid double-counting.
+  const inputTokens = Math.max(
+    0,
+    (usage?.prompt_tokens ?? 0) - cacheCreationTokens - cacheReadTokens,
+  );
+  const outputTokens = usage?.completion_tokens ?? 0;
 
   return {
     input_tokens: inputTokens,

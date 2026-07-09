@@ -119,7 +119,8 @@ describe('anthropic messages api', () => {
     expect(content[0].text).toBe('Hello from the assistant!');
 
     const usage = json.usage as Record<string, number>;
-    expect(usage.input_tokens).toBe(10);
+    // input_tokens excludes cached/created tokens (prompt_tokens=10, cached=3, created=2 → 5)
+    expect(usage.input_tokens).toBe(5);
     expect(usage.output_tokens).toBe(5);
     expect(usage.cache_read_input_tokens).toBe(3);
     expect(usage.cache_creation_input_tokens).toBe(2);
@@ -592,6 +593,64 @@ describe('anthropic messages api', () => {
 
     const json = (await response.json()) as Record<string, unknown>;
     expect(json.stop_reason).toBe('max_tokens');
+  });
+
+  it('clamps input_tokens to zero when cache exceeds prompt', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      makeJsonResponse({
+        choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+        usage: {
+          prompt_tokens: 3,
+          completion_tokens: 1,
+          total_tokens: 4,
+          prompt_tokens_details: {
+            cached_tokens: 5,
+            cache_creation_tokens: 2,
+          },
+        },
+      }),
+    );
+
+    const response = await handleMessagesRequest(
+      makeNextRequest('http://localhost/v1/messages', { method: 'POST' }),
+      {
+        model: 'claude-sonnet-4.6',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: 'Hi' }],
+      },
+    );
+
+    const json = (await response.json()) as Record<string, unknown>;
+    const usage = json.usage as Record<string, number>;
+    expect(usage.input_tokens).toBe(0);
+    expect(usage.cache_read_input_tokens).toBe(5);
+    expect(usage.cache_creation_input_tokens).toBe(2);
+  });
+
+  it('reports cache tokens in streaming usage', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      makeSseResponse([
+        'data: {"id":"chatcmpl_cu","model":"claude-sonnet-4.6","choices":[{"delta":{"content":"ok"}}]}',
+        'data: {"id":"chatcmpl_cu","model":"claude-sonnet-4.6","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":3,"total_tokens":23,"prompt_tokens_details":{"cached_tokens":8,"cache_creation_tokens":4}}}',
+        'data: [DONE]',
+      ]),
+    );
+
+    const response = await handleMessagesRequest(
+      makeNextRequest('http://localhost/v1/messages', { method: 'POST' }),
+      {
+        model: 'claude-sonnet-4.6',
+        max_tokens: 1024,
+        stream: true,
+        messages: [{ role: 'user', content: 'Hi' }],
+      },
+    );
+
+    const text = await response.text();
+    // input_tokens = 20 - 8 - 4 = 8, reported in message_delta usage
+    expect(text).toContain('"input_tokens":8');
+    expect(text).toContain('"cache_read_input_tokens":8');
+    expect(text).toContain('"cache_creation_input_tokens":4');
   });
 
   it('handles unexpected errors gracefully', async () => {
