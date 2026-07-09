@@ -11,7 +11,7 @@
     "format:check": "prettier --check .",
     "typecheck": "rm -rf .next/types && next typegen && tsc --noEmit",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage --reporter=junit --outputFile=test-report.junit.xml"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.3.0",

@@ -1,0 +1,41 @@
+coverage:
+  status:
+    project:
+      default:
+        target: 90%
+        threshold: 1%
+    patch:
+      default:
+        target: 90%
+        threshold: 1%
+
+comment:
+  layout: 'condensed_header, diff, flags, components'
+  show_critical_paths: true
+
+# Only track server library code for coverage.
+# Test files, config, and build artifacts are excluded.
+ignore:
+  - 'tests/**'
+  - 'app/**'
+  - '.next/**'
+  - 'coverage/**'
+  - 'node_modules/**'
+  - 'deploy/**'
+  - 'next-env.d.ts'
+  - 'next.config.ts'
+  - 'vitest.config.ts'
+  - 'vitest.setup.ts'
+  - 'eslint.config.ts'
+  - 'prettier.config.mts'
+
+flag_management:
+  default_rules:
+    carryforward: false
+    statuses:
+      - type: project
+        target: 90%
+        threshold: 1%
+      - type: patch
+        target: 90%
+        threshold: 1%
