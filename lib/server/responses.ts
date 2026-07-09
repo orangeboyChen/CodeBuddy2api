@@ -156,7 +156,7 @@ const findSupportedToolByName = (
   );
 };
 
-const hasSupportedToolNamePrefix = (
+const hasSupportedLongerToolNamePrefix = (
   tools: ResponsesRequestBody['tools'],
   prefix: string,
 ): boolean => {
@@ -166,7 +166,11 @@ const hasSupportedToolNamePrefix = (
 
   return filterSupportedTools(tools).some((tool) => {
     const name = extractFunctionDefinition(tool)?.name;
-    return typeof name === 'string' && name.startsWith(prefix);
+    return (
+      typeof name === 'string' &&
+      name.length > prefix.length &&
+      name.startsWith(prefix)
+    );
   });
 };
 
@@ -383,6 +387,13 @@ const getResponsesCompatibilityError = (
   toolChoice: unknown,
 ): Response | null => {
   const supportedTools = filterSupportedTools(tools);
+
+  if (toolChoice === 'required' && supportedTools.length === 0) {
+    return createErrorResponse(
+      400,
+      'tool_choice=required requires at least one supported tool for this /v1/responses adapter',
+    );
+  }
 
   if (typeof toolChoice === 'object' && toolChoice !== null) {
     const choice = toolChoice as Record<string, unknown>;
@@ -676,14 +687,11 @@ const createResponsesEventStream = async (
           !allowIncompleteName &&
           Boolean(defaults.tools?.length) &&
           toolCallState.name.length === 0;
-        const hasExactMatch =
-          findSupportedToolByName(defaults.tools, toolCallState.name) !== null;
         const shouldWaitForMoreName =
           !allowIncompleteName &&
           defaults.tools?.length &&
           toolCallState.name.length > 0 &&
-          !hasExactMatch &&
-          hasSupportedToolNamePrefix(defaults.tools, toolCallState.name);
+          hasSupportedLongerToolNamePrefix(defaults.tools, toolCallState.name);
 
         if (shouldWaitForInitialName || shouldWaitForMoreName) {
           return;

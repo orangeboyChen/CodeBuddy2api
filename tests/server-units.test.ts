@@ -987,6 +987,60 @@ describe('server units', () => {
     expect(streamText).not.toContain('"name":"function"');
   });
 
+  it('keeps buffering tool names that exactly match a shorter prefix tool', async () => {
+    process.env.CODEBUDDY_AUTH_MODE = 'api_key';
+    process.env.CODEBUDDY_API_KEY = 'cb-key';
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(
+        'data: {"choices":[{"delta":{"tool_calls":[{"id":"call_search","index":0,"type":"function","function":{"name":"search","arguments":"{\\"query\\":\\""}}]}}]}\n\n' +
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"_docs","arguments":"docs\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n' +
+          'data: [DONE]\n\n',
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/event-stream; charset=utf-8',
+          },
+        },
+      ),
+    );
+
+    const streamResponse = await handleResponsesRequest(
+      makeNextRequest('http://localhost/v1/responses', { method: 'POST' }),
+      {
+        input: 'stream shared prefix tool call',
+        model: 'gpt-5.5',
+        stream: true,
+        tools: [
+          {
+            type: 'function',
+            name: 'search',
+            parameters: {
+              type: 'object',
+              properties: { query: { type: 'string' } },
+            },
+          },
+          {
+            type: 'mcp',
+            server_label: 'docs-svc',
+            name: 'search_docs',
+            parameters: {
+              type: 'object',
+              properties: { query: { type: 'string' } },
+            },
+          },
+        ],
+      },
+    );
+
+    const streamText = await streamResponse.text();
+    expect(streamText).toContain('"type":"mcp_call"');
+    expect(streamText).toContain('"name":"search_docs"');
+    expect(streamText).not.toContain(
+      '"name":"search","arguments":"","status":"in_progress"',
+    );
+  });
+
   it('covers auth api fallback branches', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(
@@ -1296,6 +1350,22 @@ describe('server units', () => {
       },
     );
 
+    await handleResponsesRequest(
+      makeNextRequest('http://localhost/v1/responses', { method: 'POST' }),
+      {
+        input: 'use string required choice',
+        model: 'gpt-5.5',
+        tools: [
+          {
+            type: 'function',
+            name: 'lookup_weather',
+            parameters: { type: 'object', properties: {} },
+          },
+        ],
+        tool_choice: 'required',
+      },
+    );
+
     const firstUpstream = JSON.parse(
       String((fetchMock.mock.calls[0]?.[1] as RequestInit).body),
     ) as { tool_choice: unknown };
@@ -1304,6 +1374,9 @@ describe('server units', () => {
     ) as { tool_choice: unknown; tools: Array<Record<string, unknown>> };
     const thirdUpstream = JSON.parse(
       String((fetchMock.mock.calls[2]?.[1] as RequestInit).body),
+    ) as { tool_choice: unknown };
+    const fourthUpstream = JSON.parse(
+      String((fetchMock.mock.calls[3]?.[1] as RequestInit).body),
     ) as { tool_choice: unknown };
 
     expect(firstUpstream.tool_choice).toEqual({
@@ -1322,6 +1395,7 @@ describe('server units', () => {
       },
     });
     expect(thirdUpstream.tool_choice).toBe('auto');
+    expect(fourthUpstream.tool_choice).toBe('required');
   });
 
   it('accepts mcp tools, while still rejecting invalid tool_choice before proxying', async () => {
@@ -1390,12 +1464,22 @@ describe('server units', () => {
         tool_choice: { type: 'required' },
       },
     );
+    const stringRequiredUnsupportedToolsResponse = await handleResponsesRequest(
+      makeNextRequest('http://localhost/v1/responses', { method: 'POST' }),
+      {
+        input: 'require unsupported tools by string',
+        model: 'gpt-5.5',
+        tools: [{ type: 'file_search' }],
+        tool_choice: 'required',
+      },
+    );
 
     expect(mcpToolsResponse.status).toBe(200);
     expect(mcpChoiceResponse.status).toBe(200);
     expect(invalidChoiceResponse.status).toBe(400);
     expect(missingToolChoiceResponse.status).toBe(400);
     expect(requiredUnsupportedToolsResponse.status).toBe(400);
+    expect(stringRequiredUnsupportedToolsResponse.status).toBe(400);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
