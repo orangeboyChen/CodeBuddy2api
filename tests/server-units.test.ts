@@ -52,12 +52,12 @@ import {
   resetUsageStats,
 } from '@/lib/server/stats';
 
-const tempConfigDir = path.join(process.cwd(), '.tmp-test-config-units');
-const tempCredsDir = path.join(process.cwd(), '.tmp-test-creds-units');
+const repoRoot = process.cwd();
+const tempRootDir = path.join(repoRoot, '.tmp-test-config-units-root');
+const tempConfigDir = path.join(tempRootDir, 'config');
 
 const cleanupTempState = (): void => {
-  fs.rmSync(tempConfigDir, { force: true, recursive: true, maxRetries: 5 });
-  fs.rmSync(tempCredsDir, { force: true, recursive: true, maxRetries: 5 });
+  fs.rmSync(tempRootDir, { force: true, recursive: true, maxRetries: 5 });
 };
 
 const makeNextRequest = (
@@ -86,8 +86,8 @@ describe('server units', () => {
     resetResponseSessions();
     resetUsageStats();
     vi.restoreAllMocks();
-    process.env.CODEBUDDY_CONFIG_PATH = '.tmp-test-config-units/config.json';
-    process.env.CODEBUDDY_CREDS_DIR = '.tmp-test-creds-units';
+    vi.spyOn(process, 'cwd').mockReturnValue(tempRootDir);
+    process.env.CODEBUDDY_CONFIG_PATH = 'config/config.json';
     process.env.CODEBUDDY_AUTH_MODE = 'auto';
     addCredential({
       bearer_token: 'default-test-token',
@@ -367,7 +367,9 @@ describe('server units', () => {
     ).toBeNull();
   });
   it('covers credential round-robin, invalid operations, and usage stats', () => {
-    expect(deleteCredentialByIndex(0).success).toBe(true);
+    while (deleteCredentialByIndex(0).success) {
+      // delete all seeded credentials for a clean no-credentials assertion
+    }
     expect(getCurrentCredentialInfo().status).toBe('no_credentials');
     expect(selectCredential(0).success).toBe(false);
     expect(deleteCredentialByIndex(0).success).toBe(false);
@@ -658,6 +660,67 @@ describe('server units', () => {
       JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body))
         .response_format,
     ).toBeUndefined();
+  });
+
+  it('normalizes developer messages for chat upstream based on position', async () => {
+    addCredential({
+      bearer_token: 'token-dev-role',
+      created_at: Math.floor(Date.now() / 1000),
+      first_message_role_to_system: true,
+      user_id: 'developer-role@example.com',
+    });
+
+    const roleCredential = listCredentials().credentials.find(
+      (credential) => credential.user_id === 'developer-role@example.com',
+    );
+    const roleAccessKey = createAccessKey({
+      credentialFilenames: [String(roleCredential?.filename)],
+      name: 'Developer Role Key',
+    });
+
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        makeJsonResponse({ choices: [{ message: { content: 'ok' } }] }),
+      );
+
+    const response = await proxyChatCompletions(
+      makeNextRequest('http://localhost/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${roleAccessKey.secret}`,
+        },
+      }),
+      {
+        messages: [
+          { role: 'developer', content: 'first developer' },
+          { role: 'user', content: 'hello' },
+          { role: 'developer', content: 'later developer' },
+          { role: 'system', content: 'existing system' },
+          { role: 'developer', content: 'after system developer' },
+        ],
+        stream: false,
+      },
+    );
+
+    expect(response.status).toBe(200);
+
+    const upstreamBody = JSON.parse(
+      String((fetchMock.mock.calls[0]?.[1] as RequestInit).body),
+    ) as {
+      messages: Array<{
+        content: string;
+        role: string;
+      }>;
+    };
+
+    expect(upstreamBody.messages).toEqual([
+      { role: 'system', content: 'first developer' },
+      { role: 'user', content: 'hello' },
+      { role: 'user', content: 'later developer' },
+      { role: 'system', content: 'existing system' },
+      { role: 'user', content: 'after system developer' },
+    ]);
   });
 
   it('aggregates forced upstream streaming responses for non-stream clients', async () => {
@@ -1590,9 +1653,13 @@ describe('server units', () => {
     });
 
     // The credential should have been saved with enterprise/tenant info.
+    const savedCredential = listCredentials().credentials.find(
+      (credential) => credential.tenant_id === 'tenant-456',
+    );
+    expect(savedCredential?.tenant_id).toBe('tenant-456');
+
     const credInfo = getCurrentCredentialInfo();
     expect(credInfo.status).toBe('round_robin');
-    expect(credInfo.tenant_id).toBe('tenant-456');
   });
 
   it('covers authorization pending and empty token fallbacks', async () => {
