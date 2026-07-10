@@ -716,8 +716,8 @@ export const TabNav = ({ activeTab, onChange }: TabNavProps) => {
           key={tab.key}
           className={
             tab.key === activeTab
-              ? 'px-6 py-3 bg-none border-none text-primary cursor-pointer border-b-2 border-primary transition-all font-medium hover:text-primary'
-              : 'px-6 py-3 bg-none border-none text-secondary cursor-pointer border-b-2 border-transparent transition-all font-medium hover:text-primary'
+              ? 'inline-flex items-center gap-2 px-6 py-3 bg-none border-none text-primary cursor-pointer border-b-2 border-primary transition-all font-medium hover:text-primary'
+              : 'inline-flex items-center gap-2 px-6 py-3 bg-none border-none text-secondary cursor-pointer border-b-2 border-transparent transition-all font-medium hover:text-primary'
           }
           onClick={() => {
             onChange(tab.key);
