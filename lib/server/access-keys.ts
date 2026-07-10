@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { getConfigDir } from './config';
+import { getConfigDir, getCredsDir } from './config';
 
 export interface AccessKeyRecord {
   createdAt: string;
@@ -39,6 +39,74 @@ const ensureConfigDir = (): void => {
   fs.mkdirSync(getConfigDir(), { recursive: true });
 };
 
+const listAvailableCredentialFilenames = (): string[] => {
+  if (!fs.existsSync(getCredsDir())) {
+    return [];
+  }
+
+  return fs
+    .readdirSync(getCredsDir())
+    .filter((item) => item.endsWith('.json') && item !== 'manager_state.json')
+    .sort((left, right) => left.localeCompare(right))
+    .flatMap((filename) => {
+      const filePath = path.join(getCredsDir(), filename);
+
+      try {
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf8')) as Record<
+          string,
+          unknown
+        >;
+        const token = data.bearer_token ?? data.access_token;
+
+        if (!token) {
+          return [];
+        }
+
+        return [filename];
+      } catch {
+        return [];
+      }
+    });
+};
+
+const pruneAccessKeyStore = (
+  store: AccessKeyStore,
+  availableCredentialFilenames: string[],
+): { changed: boolean; store: AccessKeyStore } => {
+  const available = new Set(availableCredentialFilenames);
+  let changed = false;
+
+  const accessKeys = store.accessKeys.flatMap((record) => {
+    const credentialFilenames = normalizeCredentialFilenames(
+      record.credentialFilenames,
+    ).filter((filename) => available.has(filename));
+
+    if (credentialFilenames.length !== record.credentialFilenames.length) {
+      changed = true;
+    }
+
+    if (!credentialFilenames.length) {
+      changed = true;
+      return [];
+    }
+
+    if (
+      credentialFilenames.some(
+        (filename, index) => filename !== record.credentialFilenames[index],
+      )
+    ) {
+      changed = true;
+    }
+
+    return [{ ...record, credentialFilenames }];
+  });
+
+  return {
+    changed,
+    store: { accessKeys },
+  };
+};
+
 const readAccessKeyStoreState = (): AccessKeyStoreState => {
   const filePath = getAccessKeysPath();
 
@@ -65,9 +133,18 @@ const readAccessKeyStoreState = (): AccessKeyStoreState => {
         })
       : [];
 
+    const normalizedStore = pruneAccessKeyStore(
+      { accessKeys },
+      listAvailableCredentialFilenames(),
+    );
+
+    if (normalizedStore.changed) {
+      writeAccessKeyStore(normalizedStore.store);
+    }
+
     return {
       kind: 'ok',
-      store: { accessKeys },
+      store: normalizedStore.store,
     };
   } catch (error) {
     return {
@@ -247,6 +324,51 @@ export const deleteAccessKey = (id: string): boolean => {
   }
 
   writeAccessKeyStore({ accessKeys: nextAccessKeys });
+  return true;
+};
+
+export const removeCredentialReferencesFromAccessKeys = (
+  credentialFilename: string,
+): boolean => {
+  const store = readAccessKeyStore();
+  let changed = false;
+  const available = new Set(
+    listAvailableCredentialFilenames().filter(
+      (filename) => filename !== credentialFilename,
+    ),
+  );
+  const accessKeys = store.accessKeys.flatMap((record) => {
+    const credentialFilenames = normalizeCredentialFilenames(
+      record.credentialFilenames,
+    ).filter(
+      (filename) => filename !== credentialFilename && available.has(filename),
+    );
+
+    if (credentialFilenames.length !== record.credentialFilenames.length) {
+      changed = true;
+    }
+
+    if (!credentialFilenames.length) {
+      changed = true;
+      return [];
+    }
+
+    if (
+      credentialFilenames.some(
+        (filename, index) => filename !== record.credentialFilenames[index],
+      )
+    ) {
+      changed = true;
+    }
+
+    return [{ ...record, credentialFilenames }];
+  });
+
+  if (!changed) {
+    return false;
+  }
+
+  writeAccessKeyStore({ accessKeys });
   return true;
 };
 

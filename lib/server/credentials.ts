@@ -1,7 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { hasAccessKeys } from './access-keys';
+import {
+  hasAccessKeys,
+  removeCredentialReferencesFromAccessKeys,
+} from './access-keys';
 import { getCredsDir } from './config';
 import { recordCredentialUsage } from './stats';
 
@@ -459,6 +462,7 @@ export const deleteCredentialByIndex = (
   }
 
   fs.unlinkSync(records[index].filePath);
+  removeCredentialReferencesFromAccessKeys(records[index].filename);
 
   const state = getRuntimeState();
   const deletedFilename = records[index].filename;
