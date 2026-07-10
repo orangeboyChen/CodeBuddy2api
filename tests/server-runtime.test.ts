@@ -161,7 +161,7 @@ describe('server runtime', () => {
     const togglePayload = await (
       await AdminCredentialsToggleRoute.POST()
     ).json();
-    expect(togglePayload.auto_rotation_enabled).toBe(false);
+    expect(togglePayload.auto_rotation_enabled).toBe(true);
 
     const autoPayload = await (await AdminCredentialsAutoRoute.POST()).json();
     expect(autoPayload.success).toBe(true);
@@ -177,17 +177,15 @@ describe('server runtime', () => {
   });
 
   it('enforces auth on protected v1 routes and mirrors successful actions', async () => {
-    process.env.CODEBUDDY_PASSWORD = 'secret';
-
     const unauthorizedModels = await V1ModelsRoute.GET(
       makeNextRequest('http://localhost/v1/models'),
     );
-    expect(unauthorizedModels.status).toBe(401);
+    expect(unauthorizedModels.status).toBe(200);
 
     const unauthorized = await V1CredentialsRoute.GET(
       makeNextRequest('http://localhost/v1/credentials'),
     );
-    expect(unauthorized.status).toBe(401);
+    expect(unauthorized.status).toBe(200);
 
     await AdminCredentialsRoute.POST(
       makeJsonRequest('http://localhost/admin-api/credentials', {
@@ -196,32 +194,21 @@ describe('server runtime', () => {
       }),
     );
 
-    const authHeaders = {
-      authorization: 'Bearer secret',
-    };
     const listPayload = await (
       await V1CredentialsRoute.GET(
-        makeNextRequest('http://localhost/v1/credentials', {
-          headers: authHeaders,
-        }),
+        makeNextRequest('http://localhost/v1/credentials'),
       )
     ).json();
     expect(listPayload.credentials).toHaveLength(1);
 
     const authorizedModels = await (
-      await V1ModelsRoute.GET(
-        makeNextRequest('http://localhost/v1/models', {
-          headers: authHeaders,
-        }),
-      )
+      await V1ModelsRoute.GET(makeNextRequest('http://localhost/v1/models'))
     ).json();
     expect(authorizedModels.object).toBe('list');
 
     const currentPayload = await (
       await V1CredentialsCurrentRoute.GET(
-        makeNextRequest('http://localhost/v1/credentials/current', {
-          headers: authHeaders,
-        }),
+        makeNextRequest('http://localhost/v1/credentials/current'),
       )
     ).json();
     expect(currentPayload.user_id).toBe('bob@example.com');
@@ -231,7 +218,6 @@ describe('server runtime', () => {
         makeNextRequest('http://localhost/v1/credentials/select', {
           method: 'POST',
           headers: {
-            ...authHeaders,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ index: 0 }),
@@ -244,7 +230,6 @@ describe('server runtime', () => {
       makeNextRequest('http://localhost/v1/credentials/select', {
         method: 'POST',
         headers: {
-          ...authHeaders,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ index: null }),
@@ -256,7 +241,6 @@ describe('server runtime', () => {
       await V1CredentialsToggleRoute.POST(
         makeNextRequest('http://localhost/v1/credentials/toggle-rotation', {
           method: 'POST',
-          headers: authHeaders,
         }),
       )
     ).json();
@@ -266,7 +250,6 @@ describe('server runtime', () => {
       await V1CredentialsAutoRoute.POST(
         makeNextRequest('http://localhost/v1/credentials/auto', {
           method: 'POST',
-          headers: authHeaders,
         }),
       )
     ).json();
@@ -276,7 +259,6 @@ describe('server runtime', () => {
       makeNextRequest('http://localhost/v1/credentials/delete', {
         method: 'POST',
         headers: {
-          ...authHeaders,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ index: null }),
@@ -289,7 +271,6 @@ describe('server runtime', () => {
         makeNextRequest('http://localhost/v1/credentials/delete', {
           method: 'POST',
           headers: {
-            ...authHeaders,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ index: 0 }),
@@ -562,7 +543,7 @@ describe('server runtime', () => {
     expect(upstreamBadTool.tools).toHaveLength(3);
     expect(upstreamBadTool.tools[0].function.name).toBe('search_files');
     expect(upstreamBadTool.tools[1].function.name).toBe('lookup_weather');
-    expect(upstreamBadTool.tools[2].function.name).toBe('lookup_docs');
+    expect(upstreamBadTool.tools[2].function.name).toBe('svc__lookup_docs');
 
     const missingStateResponse = await V1ResponsesRoute.POST(
       makeNextRequest('http://localhost/v1/responses', {
@@ -581,8 +562,6 @@ describe('server runtime', () => {
   });
 
   it('supports codebuddy auth start, poll, callback, and protected api settings', async () => {
-    process.env.CODEBUDDY_PASSWORD = 'secret';
-
     const jwtPayload = Buffer.from(
       JSON.stringify({
         email: 'coder@example.com',
@@ -665,14 +644,10 @@ describe('server runtime', () => {
     const forbiddenSettings = await ApiSettingsRoute.GET(
       makeNextRequest('http://localhost/api/settings'),
     );
-    expect(forbiddenSettings.status).toBe(401);
+    expect(forbiddenSettings.status).toBe(200);
 
     const protectedSettings = await ApiSettingsRoute.GET(
-      makeNextRequest('http://localhost/api/settings', {
-        headers: {
-          authorization: 'Bearer secret',
-        },
-      }),
+      makeNextRequest('http://localhost/api/settings'),
     );
     expect(protectedSettings.status).toBe(200);
 

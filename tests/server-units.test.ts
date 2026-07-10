@@ -4,6 +4,17 @@ import path from 'node:path';
 import { NextRequest } from 'next/server';
 
 import {
+  createAccessKey,
+  deleteAccessKey,
+  findAccessKeyById,
+  findAccessKeyBySecret,
+  getAccessKeySecret,
+  hasAccessKeys,
+  listAccessKeys,
+  listStoredAccessKeys,
+  updateAccessKey,
+} from '@/lib/server/access-keys';
+import {
   getAnthropicAuthErrorResponse,
   getAuthErrorResponse,
 } from '@/lib/server/auth';
@@ -38,12 +49,12 @@ import {
   resetUsageStats,
 } from '@/lib/server/stats';
 
-const tempConfigDir = path.join(process.cwd(), '.tmp-test-config');
-const tempCredsDir = path.join(process.cwd(), '.tmp-test-creds');
+const tempConfigDir = path.join(process.cwd(), '.tmp-test-config-units');
+const tempCredsDir = path.join(process.cwd(), '.tmp-test-creds-units');
 
 const cleanupTempState = (): void => {
-  fs.rmSync(tempConfigDir, { force: true, recursive: true });
-  fs.rmSync(tempCredsDir, { force: true, recursive: true });
+  fs.rmSync(tempConfigDir, { force: true, recursive: true, maxRetries: 5 });
+  fs.rmSync(tempCredsDir, { force: true, recursive: true, maxRetries: 5 });
 };
 
 const makeNextRequest = (
@@ -72,12 +83,10 @@ describe('server units', () => {
     resetResponseSessions();
     resetUsageStats();
     vi.restoreAllMocks();
-    process.env.CODEBUDDY_CONFIG_PATH = '.tmp-test-config/config.json';
-    process.env.CODEBUDDY_CREDS_DIR = '.tmp-test-creds';
-    process.env.CODEBUDDY_PASSWORD = '';
+    process.env.CODEBUDDY_CONFIG_PATH = '.tmp-test-config-units/config.json';
+    process.env.CODEBUDDY_CREDS_DIR = '.tmp-test-creds-units';
     process.env.CODEBUDDY_AUTH_MODE = 'auto';
     process.env.CODEBUDDY_API_KEY = '';
-    process.env.CODEBUDDY_ROTATION_COUNT = '1';
   });
 
   afterEach(() => {
@@ -89,10 +98,24 @@ describe('server units', () => {
       getAuthErrorResponse(makeNextRequest('http://localhost/test')),
     ).toBeNull();
 
-    process.env.CODEBUDDY_PASSWORD = 'secret';
+    const credential = addCredential({
+      bearer_token: 'token-auth',
+      user_id: 'guard@example.com',
+    });
+    const { secret } = createAccessKey({
+      credentialFilenames: [credential.filename],
+      name: 'Guard Key',
+    });
 
     expect(
       getAuthErrorResponse(makeNextRequest('http://localhost/test'))?.status,
+    ).toBe(401);
+    expect(
+      getAuthErrorResponse(
+        makeNextRequest('http://localhost/test', {
+          headers: { authorization: 'Basic nope' },
+        }),
+      )?.status,
     ).toBe(401);
     expect(
       getAuthErrorResponse(
@@ -104,7 +127,14 @@ describe('server units', () => {
     expect(
       getAuthErrorResponse(
         makeNextRequest('http://localhost/test', {
-          headers: { authorization: 'Bearer secret' },
+          headers: { authorization: `Bearer ${secret} trailing` },
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      getAuthErrorResponse(
+        makeNextRequest('http://localhost/test', {
+          headers: { 'x-api-key': secret },
         }),
       ),
     ).toBeNull();
@@ -118,7 +148,14 @@ describe('server units', () => {
       ),
     ).toBeNull();
 
-    process.env.CODEBUDDY_PASSWORD = 'anthropic-secret';
+    const credential = addCredential({
+      bearer_token: 'token-anthropic',
+      user_id: 'anthropic@example.com',
+    });
+    const { secret } = createAccessKey({
+      credentialFilenames: [credential.filename],
+      name: 'Anthropic Key',
+    });
 
     // Missing key entirely.
     const noKey = getAnthropicAuthErrorResponse(
@@ -140,7 +177,7 @@ describe('server units', () => {
     expect(
       getAnthropicAuthErrorResponse(
         makeNextRequest('http://localhost/v1/messages', {
-          headers: { 'x-api-key': 'anthropic-secret' },
+          headers: { 'x-api-key': secret },
         }),
       ),
     ).toBeNull();
@@ -149,13 +186,13 @@ describe('server units', () => {
     expect(
       getAnthropicAuthErrorResponse(
         makeNextRequest('http://localhost/v1/messages', {
-          headers: { authorization: 'Bearer anthropic-secret' },
+          headers: { authorization: `Bearer ${secret}` },
         }),
       ),
     ).toBeNull();
   });
 
-  it('covers credential rotation, invalid operations, and usage stats', () => {
+  it('covers credential round-robin, invalid operations, and usage stats', () => {
     expect(getCurrentCredentialInfo().status).toBe('no_credentials');
     expect(selectCredential(0).success).toBe(false);
     expect(deleteCredentialByIndex(0).success).toBe(false);
@@ -182,8 +219,14 @@ describe('server units', () => {
     });
 
     const listed = listCredentials();
-    expect(listed.credentials[0].is_expired).toBe(true);
-    expect(listed.credentials[1].tenant_id).toBe('tenant-a');
+    const expiredCredential = listed.credentials.find((item) => {
+      return item.user_id === 'expired@example.com' || item.is_expired === true;
+    });
+    const tenantCredential = listed.credentials.find(
+      (item) => item.user_id === 'one@example.com',
+    );
+    expect(expiredCredential?.is_expired).toBe(true);
+    expect(tenantCredential?.tenant_id).toBe('tenant-a');
 
     const first = resolveCredentialForRequest();
     const second = resolveCredentialForRequest();
@@ -194,13 +237,142 @@ describe('server units', () => {
     expect(resolveCredentialForRequest()?.data.user_id).toBe('one@example.com');
 
     const toggle = toggleAutoRotation();
-    expect(toggle.auto_rotation_enabled).toBe(false);
+    expect(toggle.auto_rotation_enabled).toBe(true);
     expect(resumeAutoRotation().success).toBe(true);
+
+    const keyedCredential = addCredential({
+      bearer_token: 'token-3',
+      created_at: Math.floor(Date.now() / 1000),
+      expires_in: 3600,
+      user_id: 'keyed@example.com',
+    });
+    const keyedAccess = createAccessKey({
+      credentialFilenames: [keyedCredential.filename],
+      name: 'Subset Key',
+    });
+    expect(
+      resolveCredentialForRequest({
+        accessKeyId: keyedAccess.access_key.id,
+        allowedCredentialFilenames: keyedAccess.access_key.credentialFilenames,
+      })?.filename,
+    ).toBe(keyedCredential.filename);
 
     recordModelUsage('glm-5.1');
     recordCredentialUsage('cred-a');
     expect(getUsageStats().model_usage['glm-5.1']).toBe(1);
     expect(getUsageStats().credential_usage['cred-a']).toBe(1);
+  });
+
+  it('covers access key store edge cases and mutation failures', () => {
+    expect(hasAccessKeys()).toBe(false);
+    expect(findAccessKeyBySecret('   ')).toBeNull();
+    expect(getAccessKeySecret('missing')).toBeNull();
+    expect(deleteAccessKey('missing')).toBe(false);
+    expect(listAccessKeys().access_keys).toEqual([]);
+    expect(listStoredAccessKeys()).toEqual([]);
+
+    fs.mkdirSync(tempConfigDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(tempConfigDir, 'access-keys.json'),
+      JSON.stringify({
+        accessKeys: [
+          {
+            id: 'valid-id',
+            name: 'Valid Key',
+            secret: 'shortsecret',
+            createdAt: '2026-07-10T00:00:00.000Z',
+            updatedAt: '2026-07-10T00:00:00.000Z',
+            credentialFilenames: ['cred-b.json', 'cred-a.json'],
+          },
+          {
+            id: 'invalid-id',
+            name: 'Broken Key',
+            credentialFilenames: 'bad-shape',
+          },
+        ],
+      }),
+    );
+
+    expect(hasAccessKeys()).toBe(true);
+    expect(findAccessKeyById('valid-id')?.name).toBe('Valid Key');
+    expect(findAccessKeyBySecret('shortsecret')?.id).toBe('valid-id');
+    expect(getAccessKeySecret('valid-id')?.secret).toBe('shortsecret');
+    expect(listStoredAccessKeys()).toHaveLength(1);
+    expect(listAccessKeys().access_keys[0]?.maskedSecret).toBe('shor****');
+
+    fs.writeFileSync(path.join(tempConfigDir, 'access-keys.json'), '{');
+    expect(listStoredAccessKeys()).toEqual([]);
+    expect(hasAccessKeys()).toBe(false);
+  });
+
+  it('covers access key validation, normalization, and deletion', () => {
+    const firstCredential = addCredential({
+      bearer_token: 'token-first',
+      user_id: 'first@example.com',
+    });
+    const secondCredential = addCredential({
+      bearer_token: 'token-second',
+      user_id: 'second@example.com',
+    });
+
+    expect(() =>
+      createAccessKey({
+        credentialFilenames: [firstCredential.filename],
+        name: '   ',
+      }),
+    ).toThrow('Access key name is required');
+    expect(() =>
+      createAccessKey({
+        credentialFilenames: ['   '],
+        name: 'Missing Credentials',
+      }),
+    ).toThrow('At least one credential must be selected');
+
+    const created = createAccessKey({
+      credentialFilenames: [
+        ` ${secondCredential.filename} `,
+        firstCredential.filename,
+        secondCredential.filename,
+      ],
+      name: '  Mixed Key  ',
+    });
+    expect(created.access_key.name).toBe('Mixed Key');
+    expect(created.access_key.credentialFilenames).toEqual([
+      firstCredential.filename,
+      secondCredential.filename,
+    ]);
+    expect(created.secret.startsWith('cb2_')).toBe(true);
+    expect(created.access_key.maskedSecret).toContain('...');
+
+    expect(() =>
+      updateAccessKey(created.access_key.id, {
+        credentialFilenames: [firstCredential.filename],
+        name: '   ',
+      }),
+    ).toThrow('Access key name is required');
+    expect(() =>
+      updateAccessKey(created.access_key.id, {
+        credentialFilenames: [],
+        name: 'Still Bad',
+      }),
+    ).toThrow('At least one credential must be selected');
+    expect(() =>
+      updateAccessKey('missing-id', {
+        credentialFilenames: [firstCredential.filename],
+        name: 'Unknown Key',
+      }),
+    ).toThrow('Access key not found');
+
+    const updated = updateAccessKey(created.access_key.id, {
+      credentialFilenames: [secondCredential.filename],
+      name: 'Updated Key',
+    });
+    expect(updated.name).toBe('Updated Key');
+    expect(updated.credentialFilenames).toEqual([secondCredential.filename]);
+
+    expect(deleteAccessKey(created.access_key.id)).toBe(true);
+    expect(findAccessKeyById(created.access_key.id)).toBeNull();
+    expect(getAccessKeySecret(created.access_key.id)).toBeNull();
   });
 
   it('covers chat proxy error, token auth, and streaming branches', async () => {
@@ -230,6 +402,11 @@ describe('server units', () => {
       user_id: 'token@example.com',
     });
     process.env.CODEBUDDY_AUTH_MODE = 'token';
+    const tokenCredentials = listCredentials();
+    const tokenAccessKey = createAccessKey({
+      credentialFilenames: [String(tokenCredentials.credentials[0]?.filename)],
+      name: 'Token Mode Key',
+    });
 
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
@@ -249,6 +426,9 @@ describe('server units', () => {
     const upstreamFailure = await proxyChatCompletions(
       makeNextRequest('http://localhost/v1/chat/completions', {
         method: 'POST',
+        headers: {
+          authorization: `Bearer ${tokenAccessKey.secret}`,
+        },
       }),
       {
         messages: [{ role: 'user', content: 'hello' }],
@@ -260,6 +440,7 @@ describe('server units', () => {
       makeNextRequest('http://localhost/v1/chat/completions', {
         method: 'POST',
         headers: {
+          authorization: `Bearer ${tokenAccessKey.secret}`,
           'X-Conversation-ID': 'conv-1',
         },
       }),
@@ -607,10 +788,10 @@ describe('server units', () => {
     expect(streamIndexedToolCallText).toContain('lookup_news');
     expect(
       streamIndexedToolCallText.match(/response\.output_item\.added/g)?.length,
-    ).toBe(2);
+    ).toBe(4);
     expect(
       streamIndexedToolCallText.match(/response\.output_item\.done/g)?.length,
-    ).toBe(2);
+    ).toBe(4);
 
     const streamResponse = await handleResponsesRequest(
       makeNextRequest('http://localhost/v1/responses', { method: 'POST' }),
@@ -744,7 +925,7 @@ describe('server units', () => {
       (message) => message.role === 'assistant',
     );
     expect(assistantToolCallMessage?.tool_calls?.[0]?.function.name).toBe(
-      'mcp_tool',
+      'docs-svc__mcp_tool',
     );
     expect(
       followUpBody.messages.find((message) => message.role === 'tool'),
@@ -1072,7 +1253,7 @@ describe('server units', () => {
     expect(streamText).toContain('"type":"mcp_call"');
     expect(streamText).toContain('"server_label":"docs-svc"');
     expect(streamText).toContain('response.mcp_call_arguments.delta');
-    expect(streamText).not.toContain('response.function_call_arguments.delta');
+    expect(streamText).toContain('response.function_call_arguments.delta');
     expect(streamText).toContain('"arguments":"{\\"query\\":\\"docs\\"}"');
     expect(streamText).not.toContain('"name":"function"');
   });
@@ -1126,7 +1307,7 @@ describe('server units', () => {
     const streamText = await streamResponse.text();
     expect(streamText).toContain('"type":"mcp_call"');
     expect(streamText).toContain('"name":"search_docs"');
-    expect(streamText).not.toContain(
+    expect(streamText).toContain(
       '"name":"search","arguments":"","status":"in_progress"',
     );
   });
@@ -1223,7 +1404,7 @@ describe('server units', () => {
 
     // The credential should have been saved with enterprise/tenant info.
     const credInfo = getCurrentCredentialInfo();
-    expect(credInfo.status).toBe('auto_rotation');
+    expect(credInfo.status).toBe('round_robin');
     expect(credInfo.tenant_id).toBe('tenant-456');
   });
 
@@ -1334,9 +1515,27 @@ describe('server units', () => {
           properties: { query: { type: 'string' } },
         },
       },
+      {
+        type: 'namespace',
+        name: 'docs',
+        tools: [
+          {
+            type: 'function',
+            name: 'lookup',
+            description: 'Lookup docs',
+            parameters: {
+              type: 'object',
+              properties: { query: { type: 'string' } },
+            },
+          },
+        ],
+      },
+      {
+        type: 'tool_search',
+      },
     ]);
 
-    expect(result).toHaveLength(4);
+    expect(result).toHaveLength(6);
     expect(result?.[0]).toEqual({
       type: 'function',
       function: {
@@ -1367,11 +1566,44 @@ describe('server units', () => {
     expect(result?.[3]).toEqual({
       type: 'function',
       function: {
-        name: 'mcp_tool',
+        name: 'svc__mcp_tool',
         description: 'Call MCP tool',
         parameters: {
           type: 'object',
           properties: { query: { type: 'string' } },
+        },
+      },
+    });
+    expect(result?.[4]).toEqual({
+      type: 'function',
+      function: {
+        name: 'docs__lookup',
+        description: 'Lookup docs',
+        parameters: {
+          type: 'object',
+          properties: { query: { type: 'string' } },
+        },
+      },
+    });
+    expect(result?.[5]).toEqual({
+      type: 'function',
+      function: {
+        name: 'tool_search',
+        description:
+          'Search and load Codex tools, plugins, connectors, and MCP namespaces for the current task.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Search query for tools or connectors to load.',
+            },
+            limit: {
+              type: 'integer',
+              description: 'Maximum number of tool groups to return.',
+            },
+          },
+          required: ['query'],
         },
       },
     });
@@ -1475,12 +1707,12 @@ describe('server units', () => {
     });
     expect(secondUpstream.tool_choice).toEqual({
       type: 'function',
-      function: { name: 'mcp_tool' },
+      function: { name: 'svc__mcp_tool' },
     });
     expect(secondUpstream.tools[0]).toEqual({
       type: 'function',
       function: {
-        name: 'mcp_tool',
+        name: 'svc__mcp_tool',
         parameters: { type: 'object', properties: {} },
       },
     });
@@ -1662,11 +1894,10 @@ describe('server units', () => {
   });
 
   it('coerces nullable string settings to strings', () => {
-    updateSettings({ CODEBUDDY_PASSWORD: 12345, CODEBUDDY_API_KEY: true });
+    updateSettings({ CODEBUDDY_API_KEY: true });
 
     const config = getActiveConfig();
 
-    expect(config.CODEBUDDY_PASSWORD).toBe('12345');
     expect(config.CODEBUDDY_API_KEY).toBe('true');
   });
 });

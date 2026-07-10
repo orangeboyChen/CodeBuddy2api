@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 
+import { resolveRequestAccessKey } from './auth';
 import {
   getActiveConfig,
   getAvailableModels,
@@ -108,7 +109,7 @@ const normalizeMessages = (messages: OpenAIMessage[]): OpenAIMessage[] => {
   return filtered;
 };
 
-const getResolvedAuth = (): ResolvedAuth => {
+const getResolvedAuth = (request: NextRequest): ResolvedAuth => {
   const config = getActiveConfig();
   const mode = config.CODEBUDDY_AUTH_MODE;
   const apiKey = config.CODEBUDDY_API_KEY?.trim();
@@ -125,7 +126,11 @@ const getResolvedAuth = (): ResolvedAuth => {
     };
   }
 
-  const credential = resolveCredentialForRequest();
+  const accessKey = resolveRequestAccessKey(request);
+  const credential = resolveCredentialForRequest({
+    accessKeyId: accessKey?.id,
+    allowedCredentialFilenames: accessKey?.credentialFilenames,
+  });
 
   if (!credential) {
     throw new Error('No valid CodeBuddy credentials found');
@@ -660,14 +665,19 @@ const aggregateUpstreamStream = async (
 };
 
 export const getModelsResponse = (): Response => {
+  const models = getAvailableModels().map((model) => ({
+    id: model,
+    slug: model,
+    display_name: model,
+    object: 'model',
+    created: 0,
+    owned_by: 'codebuddy',
+  }));
+
   return Response.json({
     object: 'list',
-    data: getAvailableModels().map((model) => ({
-      id: model,
-      object: 'model',
-      created: 0,
-      owned_by: 'codebuddy',
-    })),
+    data: models,
+    models,
   });
 };
 
@@ -680,7 +690,7 @@ export const proxyChatCompletions = async (
   }
 
   try {
-    const auth = getResolvedAuth();
+    const auth = getResolvedAuth(request);
     const upstreamBody = buildUpstreamBody(body);
     const upstreamResponse = await fetch(
       `${getCodeBuddyApiEndpoint()}/v2/chat/completions`,

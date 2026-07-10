@@ -15,6 +15,15 @@ interface ResponsesInputItem {
   call_id?: string;
 }
 
+interface SupportedChatTool {
+  chatName: string;
+  kind: 'custom' | 'function' | 'mcp' | 'tool_search';
+  namespace?: string;
+  originalName: string;
+  serverLabel?: string;
+  tool: Record<string, unknown>;
+}
+
 interface ResponsesRequestBody {
   model?: string;
   input?: string | ResponsesInputItem[];
@@ -82,9 +91,19 @@ interface StreamingToolCallState {
   pendingArgumentDeltas: string[];
 }
 
+interface StreamingMessageState {
+  outputIndex: number;
+  outputItemId: string;
+}
+
 type SupportedResponsesTool = NonNullable<
   ResponsesRequestBody['tools']
 >[number];
+
+const TOOL_SEARCH_PROXY_NAME = 'tool_search';
+const CUSTOM_TOOL_INPUT_FIELD = 'input';
+const CUSTOM_TOOL_INPUT_DESCRIPTION =
+  'Raw string input for the original custom tool.';
 
 const globalResponsesState = globalThis as typeof globalThis & {
   __codebuddy2apiResponseSessions__?: Map<string, ResponseSession>;
@@ -96,6 +115,10 @@ const getSessionStore = (): Map<string, ResponseSession> => {
   }
 
   return globalResponsesState.__codebuddy2apiResponseSessions__;
+};
+
+const flattenNamespaceToolName = (namespace: string, name: string): string => {
+  return `${namespace}__${name}`;
 };
 
 const extractFunctionDefinition = (
@@ -131,27 +154,170 @@ const extractFunctionDefinition = (
   return functionDef;
 };
 
-const filterSupportedTools = (
+const buildCustomToolDefinition = (
+  tool: Record<string, unknown>,
+): Record<string, unknown> | null => {
+  const name = typeof tool.name === 'string' ? tool.name.trim() : '';
+
+  if (!name) {
+    return null;
+  }
+
+  const description =
+    typeof tool.description === 'string' && tool.description.trim()
+      ? tool.description
+      : `Custom tool ${name}`;
+
+  return {
+    name,
+    description,
+    parameters: {
+      type: 'object',
+      properties: {
+        [CUSTOM_TOOL_INPUT_FIELD]: {
+          type: 'string',
+          description: CUSTOM_TOOL_INPUT_DESCRIPTION,
+        },
+      },
+      required: [CUSTOM_TOOL_INPUT_FIELD],
+    },
+  };
+};
+
+const buildToolSearchDefinition = (): Record<string, unknown> => {
+  return {
+    name: TOOL_SEARCH_PROXY_NAME,
+    description:
+      'Search and load Codex tools, plugins, connectors, and MCP namespaces for the current task.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search query for tools or connectors to load.',
+        },
+        limit: {
+          type: 'integer',
+          description: 'Maximum number of tool groups to return.',
+        },
+      },
+      required: ['query'],
+    },
+  };
+};
+
+const toSupportedChatTool = (
+  tool: SupportedResponsesTool,
+  namespace?: string,
+): SupportedChatTool[] => {
+  const toolType = typeof tool.type === 'string' ? tool.type : 'function';
+
+  if (toolType === 'namespace') {
+    const namespaceName = typeof tool.name === 'string' ? tool.name.trim() : '';
+    const children = (
+      Array.isArray(tool.tools)
+        ? tool.tools
+        : Array.isArray(tool.children)
+          ? tool.children
+          : []
+    ).filter((item): item is SupportedResponsesTool => {
+      return Boolean(item && typeof item === 'object');
+    });
+
+    if (!namespaceName || !children.length) {
+      return [];
+    }
+
+    return children.flatMap((child) =>
+      toSupportedChatTool(child, namespaceName),
+    );
+  }
+
+  if (toolType === 'tool_search') {
+    const definition = buildToolSearchDefinition();
+    return [
+      {
+        chatName: TOOL_SEARCH_PROXY_NAME,
+        kind: 'tool_search',
+        originalName: TOOL_SEARCH_PROXY_NAME,
+        tool: definition,
+      },
+    ];
+  }
+
+  if (toolType === 'custom') {
+    const definition = buildCustomToolDefinition(tool);
+
+    if (!definition || typeof definition.name !== 'string') {
+      return [];
+    }
+
+    return [
+      {
+        chatName: definition.name,
+        kind: 'custom',
+        originalName: definition.name,
+        tool: definition,
+      },
+    ];
+  }
+
+  const functionDef = extractFunctionDefinition(tool);
+
+  if (!functionDef || typeof functionDef.name !== 'string') {
+    return [];
+  }
+
+  const originalName = functionDef.name;
+  const chatName = namespace
+    ? flattenNamespaceToolName(namespace, originalName)
+    : toolType === 'mcp' &&
+        typeof tool.server_label === 'string' &&
+        tool.server_label.trim()
+      ? flattenNamespaceToolName(tool.server_label.trim(), originalName)
+      : originalName;
+
+  return [
+    {
+      chatName,
+      kind: toolType === 'mcp' ? 'mcp' : 'function',
+      namespace:
+        namespace ||
+        (typeof tool.server_label === 'string' ? tool.server_label : undefined),
+      originalName,
+      serverLabel:
+        toolType === 'mcp' && typeof tool.server_label === 'string'
+          ? tool.server_label
+          : undefined,
+      tool: {
+        ...functionDef,
+        name: chatName,
+      },
+    },
+  ];
+};
+
+const getSupportedChatTools = (
   tools: ResponsesRequestBody['tools'],
-): NonNullable<ResponsesRequestBody['tools']> => {
+): SupportedChatTool[] => {
   if (!tools?.length) {
     return [];
   }
 
-  return tools.filter((tool) => extractFunctionDefinition(tool) !== null);
+  return tools.flatMap((tool) => toSupportedChatTool(tool));
 };
 
 const findSupportedToolByName = (
   tools: ResponsesRequestBody['tools'],
   name: string,
-): SupportedResponsesTool | null => {
+): SupportedChatTool | null => {
   if (!tools?.length || !name) {
     return null;
   }
 
   return (
-    filterSupportedTools(tools).find(
-      (tool) => extractFunctionDefinition(tool)?.name === name,
+    getSupportedChatTools(tools).find(
+      (tool) => tool.chatName === name || tool.originalName === name,
     ) ?? null
   );
 };
@@ -164,8 +330,8 @@ const hasSupportedLongerToolNamePrefix = (
     return false;
   }
 
-  return filterSupportedTools(tools).some((tool) => {
-    const name = extractFunctionDefinition(tool)?.name;
+  return getSupportedChatTools(tools).some((tool) => {
+    const name = tool.chatName;
     return (
       typeof name === 'string' &&
       name.length > prefix.length &&
@@ -185,21 +351,22 @@ const buildResponsesToolCallOutputItem = (
   },
 ): Record<string, unknown> => {
   const originalTool = findSupportedToolByName(tools, toolCall.name);
-  const itemType = originalTool?.type === 'mcp' ? 'mcp_call' : 'function_call';
+  const itemType = originalTool?.kind === 'mcp' ? 'mcp_call' : 'function_call';
   const item: Record<string, unknown> = {
     id: toolCall.id,
     type: itemType,
     call_id: toolCall.callId,
-    name: toolCall.name || 'function',
+    name: originalTool?.originalName ?? toolCall.name ?? 'function',
     arguments: toolCall.arguments,
     status: toolCall.status,
   };
 
-  if (
-    originalTool?.type === 'mcp' &&
-    typeof originalTool.server_label === 'string'
-  ) {
-    item.server_label = originalTool.server_label;
+  if (originalTool?.kind === 'mcp' && originalTool.serverLabel) {
+    item.server_label = originalTool.serverLabel;
+  }
+
+  if (originalTool?.kind === 'function' && originalTool.namespace) {
+    item.namespace = originalTool.namespace;
   }
 
   return item;
@@ -211,13 +378,14 @@ const getResponsesToolCallArgumentDeltaEventType = (
 ):
   | 'response.function_call_arguments.delta'
   | 'response.mcp_call_arguments.delta' => {
-  return findSupportedToolByName(tools, name)?.type === 'mcp'
+  return findSupportedToolByName(tools, name)?.kind === 'mcp'
     ? 'response.mcp_call_arguments.delta'
     : 'response.function_call_arguments.delta';
 };
 
 const buildAssistantTranscriptToolCalls = (
   toolCalls: ChatResponseToolCall[],
+  tools?: ResponsesRequestBody['tools'],
 ): TranscriptMessage['tool_calls'] | undefined => {
   if (!toolCalls.length) {
     return undefined;
@@ -227,7 +395,11 @@ const buildAssistantTranscriptToolCalls = (
     id: normalizeToolCallId(toolCall.id, index),
     type: 'function',
     function: {
-      name: toolCall.function?.name ?? 'function',
+      name:
+        findSupportedToolByName(tools, toolCall.function?.name ?? '')
+          ?.originalName ??
+        toolCall.function?.name ??
+        'function',
       arguments: toolCall.function?.arguments ?? '',
     },
   }));
@@ -235,6 +407,7 @@ const buildAssistantTranscriptToolCalls = (
 
 const buildStreamingAssistantTranscriptToolCalls = (
   toolCallStates: StreamingToolCallState[],
+  tools?: ResponsesRequestBody['tools'],
 ): TranscriptMessage['tool_calls'] | undefined => {
   if (!toolCallStates.length) {
     return undefined;
@@ -245,7 +418,9 @@ const buildStreamingAssistantTranscriptToolCalls = (
     type: 'function',
     function: {
       arguments: toolCallState.arguments,
-      name: toolCallState.name,
+      name:
+        findSupportedToolByName(tools, toolCallState.name)?.originalName ??
+        toolCallState.name,
     },
   }));
 };
@@ -358,19 +533,15 @@ export const translateResponsesToolsToChat = (
     return undefined;
   }
 
-  const supported = filterSupportedTools(tools);
+  const supported = getSupportedChatTools(tools);
   if (!supported.length) {
     return undefined;
   }
 
   return supported.map((tool) => {
-    const functionDef = extractFunctionDefinition(tool) as Record<
-      string,
-      unknown
-    >;
     return {
       type: 'function',
-      function: functionDef,
+      function: tool.tool,
     };
   });
 };
@@ -411,6 +582,38 @@ const translateResponsesToolChoiceToChat = (toolChoice: unknown): unknown => {
   return toolChoice;
 };
 
+const translateResponsesToolChoiceToChatWithTools = (
+  tools: ResponsesRequestBody['tools'],
+  toolChoice: unknown,
+): unknown => {
+  const translated = translateResponsesToolChoiceToChat(toolChoice);
+
+  if (typeof translated !== 'object' || translated === null) {
+    return translated;
+  }
+
+  const choice = translated as Record<string, unknown>;
+
+  if (
+    choice.type === 'function' &&
+    typeof choice.function === 'object' &&
+    choice.function !== null
+  ) {
+    const functionChoice = choice.function as Record<string, unknown>;
+    if (typeof functionChoice.name === 'string') {
+      return {
+        ...choice,
+        function: {
+          ...functionChoice,
+          name: resolveChatToolName(tools, functionChoice.name),
+        },
+      };
+    }
+  }
+
+  return translated;
+};
+
 const getNamedToolChoice = (toolChoice: unknown): string | null => {
   if (typeof toolChoice !== 'object' || toolChoice === null) {
     return null;
@@ -438,7 +641,7 @@ const getResponsesCompatibilityError = (
   tools: ResponsesRequestBody['tools'],
   toolChoice: unknown,
 ): Response | null => {
-  const supportedTools = filterSupportedTools(tools);
+  const supportedTools = getSupportedChatTools(tools);
 
   if (toolChoice === 'required' && supportedTools.length === 0) {
     return createErrorResponse(
@@ -482,7 +685,7 @@ const getResponsesCompatibilityError = (
   if (namedToolChoice) {
     const supportedNames = new Set(
       supportedTools
-        .map((tool) => extractFunctionDefinition(tool)?.name)
+        .map((tool) => tool.originalName)
         .filter((name): name is string => typeof name === 'string'),
     );
 
@@ -581,6 +784,35 @@ const prepareTranscript = (
   };
 };
 
+const resolveChatToolName = (
+  tools: ResponsesRequestBody['tools'],
+  name: string,
+): string => {
+  return findSupportedToolByName(tools, name)?.chatName ?? name;
+};
+
+const normalizeTranscriptMessageToolNames = (
+  transcript: TranscriptMessage[],
+  tools: ResponsesRequestBody['tools'],
+): TranscriptMessage[] => {
+  return transcript.map((message) => {
+    if (!message.tool_calls?.length) {
+      return message;
+    }
+
+    return {
+      ...message,
+      tool_calls: message.tool_calls.map((toolCall) => ({
+        ...toolCall,
+        function: {
+          ...toolCall.function,
+          name: resolveChatToolName(tools, toolCall.function.name),
+        },
+      })),
+    };
+  });
+};
+
 const mapChatResponseToResponsesPayload = (
   defaults: ResponseSessionDefaults,
   transcript: TranscriptMessage[],
@@ -601,7 +833,10 @@ const mapChatResponseToResponsesPayload = (
   const outputText = stringifyContent(firstChoice.message?.content);
   const createdAt = Math.floor(Date.now() / 1000);
   const output: Array<Record<string, unknown>> = [];
-  const transcriptToolCalls = buildAssistantTranscriptToolCalls(toolCalls);
+  const transcriptToolCalls = buildAssistantTranscriptToolCalls(
+    toolCalls,
+    defaults.tools,
+  );
 
   if (outputText || !toolCalls.length) {
     output.push({
@@ -673,12 +908,15 @@ const createResponsesEventStream = async (
       ...(defaults.instructions
         ? [{ role: 'system', content: defaults.instructions }]
         : []),
-      ...transcript,
+      ...normalizeTranscriptMessageToolNames(transcript, defaults.tools),
     ],
     max_tokens: maxOutputTokens,
     stream: true,
     tools: translateResponsesToolsToChat(defaults.tools),
-    tool_choice: translateResponsesToolChoiceToChat(defaults.tool_choice),
+    tool_choice: translateResponsesToolChoiceToChatWithTools(
+      defaults.tools,
+      defaults.tool_choice,
+    ),
   });
 
   if (!upstreamResponse.ok || !upstreamResponse.body) {
@@ -687,9 +925,14 @@ const createResponsesEventStream = async (
 
   const responseId = createResponseId();
   let outputText = '';
+  const messageState: StreamingMessageState = {
+    outputIndex: 0,
+    outputItemId: createMessageId(),
+  };
+  let messageAddedEmitted = false;
   const toolCallStates = new Map<string, StreamingToolCallState>();
   const toolCallStateKeys = new Map<string, string>();
-  let nextToolCallOutputIndex = 0;
+  let nextToolCallOutputIndex = 1;
 
   const stream = new ReadableStream<Uint8Array>({
     start: (controller) => {
@@ -699,9 +942,43 @@ const createResponsesEventStream = async (
       let buffer = '';
 
       const enqueueEvent = (payload: Record<string, unknown>): void => {
+        const eventType =
+          typeof payload.type === 'string' ? payload.type : 'message';
         controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify(payload)}\n\n`),
+          encoder.encode(
+            `event: ${eventType}\ndata: ${JSON.stringify(payload)}\n\n`,
+          ),
         );
+      };
+
+      const buildStreamingMessageItem = (
+        status: 'completed' | 'in_progress',
+      ): Record<string, unknown> => ({
+        id: messageState.outputItemId,
+        type: 'message',
+        role: 'assistant',
+        status,
+        content: [
+          {
+            type: 'output_text',
+            text: outputText,
+            annotations: [],
+          },
+        ],
+      });
+
+      const ensureMessageAdded = (): void => {
+        if (messageAddedEmitted) {
+          return;
+        }
+
+        enqueueEvent({
+          type: 'response.output_item.added',
+          item: buildStreamingMessageItem('in_progress'),
+          output_index: messageState.outputIndex,
+          response_id: responseId,
+        });
+        messageAddedEmitted = true;
       };
 
       enqueueEvent({
@@ -711,6 +988,7 @@ const createResponsesEventStream = async (
           object: 'response',
           created_at: Math.floor(Date.now() / 1000),
           model,
+          output: [],
         },
       });
       enqueueEvent({
@@ -777,9 +1055,10 @@ const createResponsesEventStream = async (
 
         if (done) {
           const transcriptToolCalls =
-            buildStreamingAssistantTranscriptToolCalls([
-              ...toolCallStates.values(),
-            ]);
+            buildStreamingAssistantTranscriptToolCalls(
+              [...toolCallStates.values()],
+              defaults.tools,
+            );
           getSessionStore().set(responseId, {
             id: responseId,
             model,
@@ -812,7 +1091,33 @@ const createResponsesEventStream = async (
               output_index: toolCallState.outputIndex,
               response_id: responseId,
             });
+            enqueueEvent({
+              type: getResponsesToolCallArgumentDeltaEventType(
+                defaults.tools,
+                toolCallState.name,
+              ).replace('.delta', '.done'),
+              arguments: toolCallState.arguments,
+              item_id: toolCallState.outputItemId,
+              output_index: toolCallState.outputIndex,
+              response_id: responseId,
+            });
           });
+          if (outputText) {
+            ensureMessageAdded();
+            enqueueEvent({
+              type: 'response.output_text.done',
+              item: buildStreamingMessageItem('completed'),
+              output_index: messageState.outputIndex,
+              response_id: responseId,
+              text: outputText,
+            });
+            enqueueEvent({
+              type: 'response.output_item.done',
+              item: buildStreamingMessageItem('completed'),
+              output_index: messageState.outputIndex,
+              response_id: responseId,
+            });
+          }
           enqueueEvent({
             type: 'response.completed',
             response: {
@@ -820,6 +1125,18 @@ const createResponsesEventStream = async (
               status: 'completed',
               output_text: outputText,
               previous_response_id: previousResponseId,
+              output: [
+                ...(outputText ? [buildStreamingMessageItem('completed')] : []),
+                ...[...toolCallStates.values()].map((toolCallState) =>
+                  buildResponsesToolCallOutputItem(defaults.tools, {
+                    arguments: toolCallState.arguments,
+                    callId: toolCallState.callId,
+                    id: toolCallState.outputItemId,
+                    name: toolCallState.name || 'function',
+                    status: 'completed',
+                  }),
+                ),
+              ],
             },
           });
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
@@ -859,10 +1176,13 @@ const createResponsesEventStream = async (
             const delta = payload.choices?.[0]?.delta;
 
             if (delta?.content) {
+              ensureMessageAdded();
               outputText += delta.content;
               enqueueEvent({
                 type: 'response.output_text.delta',
                 delta: delta.content,
+                item: buildStreamingMessageItem('in_progress'),
+                output_index: messageState.outputIndex,
                 response_id: responseId,
               });
             }
@@ -972,7 +1292,7 @@ export const handleResponsesRequest = async (
       return compatibilityError;
     }
 
-    prepared.defaults.tools = filterSupportedTools(prepared.defaults.tools);
+    prepared.defaults.tools = prepared.defaults.tools;
 
     if (body.stream) {
       return await createResponsesEventStream(
@@ -991,12 +1311,16 @@ export const handleResponsesRequest = async (
         ...(prepared.defaults.instructions
           ? [{ role: 'system', content: prepared.defaults.instructions }]
           : []),
-        ...prepared.transcript,
+        ...normalizeTranscriptMessageToolNames(
+          prepared.transcript,
+          prepared.defaults.tools,
+        ),
       ],
       max_tokens: body.max_output_tokens,
       stream: false,
       tools: translateResponsesToolsToChat(prepared.defaults.tools),
-      tool_choice: translateResponsesToolChoiceToChat(
+      tool_choice: translateResponsesToolChoiceToChatWithTools(
+        prepared.defaults.tools,
         prepared.defaults.tool_choice,
       ),
     });
