@@ -274,6 +274,146 @@ describe('AdminConsole', () => {
     expect(screen.queryByText('手动添加凭证')).not.toBeInTheDocument();
   });
 
+  it('renders usage tab filters, summary, charts, and clear action', async () => {
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      if (input === '/admin-api/usage?accessKey=all&credential=all&range=24h') {
+        return makeJsonResponse({
+          callSeries: [
+            {
+              model: 'glm-5.1',
+              points: [
+                {
+                  callCount: 2,
+                  cacheHitTokens: 10,
+                  label: '09:00',
+                  start: '2026-07-11T09:00:00.000Z',
+                  totalTokens: 120,
+                },
+                {
+                  callCount: 3,
+                  cacheHitTokens: 12,
+                  label: '10:00',
+                  start: '2026-07-11T10:00:00.000Z',
+                  totalTokens: 180,
+                },
+              ],
+            },
+          ],
+          filters: {
+            accessKeys: [
+              { label: '全部 API Key', value: 'all' },
+              { label: 'Primary API Key', value: 'ak-1' },
+            ],
+            credentials: [
+              { label: '全部凭据', value: 'all' },
+              { label: 'cred-1.json', value: 'cred-1.json' },
+            ],
+          },
+          range: '24h',
+          tableRows: [
+            {
+              callCount: 5,
+              cacheHitTokens: 22,
+              model: 'glm-5.1',
+              totalTokens: 300,
+            },
+          ],
+          todaySummary: {
+            cacheHitTokens: 22,
+            callCount: 5,
+            totalTokens: 300,
+          },
+          tokenSeries: [
+            {
+              model: 'glm-5.1',
+              points: [
+                {
+                  callCount: 2,
+                  cacheHitTokens: 10,
+                  label: '09:00',
+                  start: '2026-07-11T09:00:00.000Z',
+                  totalTokens: 120,
+                },
+                {
+                  callCount: 3,
+                  cacheHitTokens: 12,
+                  label: '10:00',
+                  start: '2026-07-11T10:00:00.000Z',
+                  totalTokens: 180,
+                },
+              ],
+            },
+          ],
+        });
+      }
+
+      if (
+        input === '/admin-api/usage/clear' &&
+        init &&
+        typeof init === 'object' &&
+        'method' in init &&
+        init.method === 'POST'
+      ) {
+        return makeJsonResponse({ success: true });
+      }
+
+      if (input === '/health') {
+        return makeJsonResponse({ status: 'healthy' });
+      }
+
+      if (input === '/admin-api/credentials') {
+        return makeJsonResponse({ credentials: initialData.credentials });
+      }
+
+      if (input === '/admin-api/credentials/current') {
+        return makeJsonResponse(initialData.currentCredential);
+      }
+
+      if (input === '/admin-api/access-keys') {
+        return makeJsonResponse({ access_keys: initialData.accessKeys });
+      }
+
+      if (input === '/admin-api/debug') {
+        return makeJsonResponse(initialData.debug);
+      }
+
+      if (input === '/admin-api/stats') {
+        return makeJsonResponse({
+          credential_usage: {},
+          model_usage: {},
+        });
+      }
+
+      return makeJsonResponse({});
+    });
+
+    render(React.createElement(AdminConsole));
+
+    fireEvent.click(screen.getByText('Usage'));
+
+    expect(await screen.findByLabelText('Usage range')).toBeInTheDocument();
+    expect(screen.getByText('Usage 自动刷新默认已开启')).toBeInTheDocument();
+    expect(screen.getByText('今日调用次数')).toBeInTheDocument();
+    expect(screen.getByText('Token 消耗趋势')).toBeInTheDocument();
+    expect(screen.getByText('模型汇总')).toBeInTheDocument();
+    expect(screen.getAllByText('glm-5.1')).toHaveLength(3);
+    expect(screen.getByLabelText('Usage auto refresh interval')).toHaveValue(
+      '15',
+    );
+    expect(screen.getByRole('option', { name: '关闭' })).toHaveValue('0');
+
+    fireEvent.click(screen.getByText('清空历史'));
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        '/admin-api/usage/clear',
+        expect.objectContaining({
+          method: 'POST',
+        }),
+      );
+    });
+  });
+
   it('shows API Key reveal and editor inline inside the same card', async () => {
     vi.mocked(globalThis.fetch).mockImplementation(async (input, _init) => {
       if (input === '/admin-api/access-keys/ak-1/secret') {

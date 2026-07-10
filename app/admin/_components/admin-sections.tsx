@@ -10,6 +10,8 @@ import type {
   NotificationState,
   SettingsState,
   TabKey,
+  UsageRange,
+  UsageState,
 } from '@/app/admin/_components/admin-store';
 import {
   DEFAULT_TEST_MODELS,
@@ -73,6 +75,18 @@ interface SettingsSectionProps {
   state: SettingsState;
 }
 
+interface UsageSectionProps {
+  onAccessKeyChange: (value: string) => void;
+  onClearHistory: () => void;
+  onCloseAutoRefresh: () => void;
+  onCredentialChange: (value: string) => void;
+  onHoverPoint: (point: UsageState['hoveredPoint']) => void;
+  onRangeChange: (value: UsageRange) => void;
+  onRefresh: () => void;
+  onAutoRefreshSecondsChange: (value: number) => void;
+  state: UsageState;
+}
+
 interface DebugSectionProps {
   autoRefreshOptions: Array<{ label: string; value: number }>;
   onClear: () => void;
@@ -88,6 +102,36 @@ interface DebugSectionProps {
 interface NotificationBarProps {
   notification: NotificationState | null;
 }
+
+const USAGE_RANGE_OPTIONS: Array<{ label: string; value: UsageRange }> = [
+  { label: '1 小时', value: '1h' },
+  { label: '3 小时', value: '3h' },
+  { label: '6 小时', value: '6h' },
+  { label: '12 小时', value: '12h' },
+  { label: '24 小时', value: '24h' },
+  { label: '3 天', value: '3d' },
+  { label: '7 天', value: '7d' },
+  { label: '今天', value: 'today' },
+  { label: '昨天', value: 'yesterday' },
+];
+
+const CHART_COLORS = [
+  '#1d4ed8',
+  '#ea580c',
+  '#059669',
+  '#9333ea',
+  '#dc2626',
+  '#0891b2',
+];
+
+const USAGE_AUTO_REFRESH_OPTIONS = [
+  { label: '关闭', value: 0 },
+  { label: '5 秒', value: 5 },
+  { label: '15 秒', value: 15 },
+  { label: '30 秒', value: 30 },
+  { label: '60 秒', value: 60 },
+  { label: '300 秒', value: 300 },
+] as const;
 
 const getRingStyle = (percent: number) => {
   const normalizedPercent = Math.min(100, Math.max(0, percent));
@@ -165,6 +209,214 @@ const formatCurrentStatus = (current: CurrentCredentialInfo | null) => {
   }
 
   return '当前未配置 API Key，请求会在全局可用凭证之间轮询。';
+};
+
+const formatNumber = (value: number) => {
+  return new Intl.NumberFormat('zh-CN').format(value);
+};
+
+const renderUsageChart = ({
+  chart,
+  emptyLabel,
+  hoveredPoint,
+  metric,
+  onHoverPoint,
+  series,
+  title,
+}: {
+  chart: 'calls' | 'tokens';
+  emptyLabel: string;
+  hoveredPoint: UsageState['hoveredPoint'];
+  metric: 'callCount' | 'totalTokens';
+  onHoverPoint: UsageSectionProps['onHoverPoint'];
+  series: UsageState['callSeries'];
+  title: string;
+}) => {
+  const width = 760;
+  const height = 240;
+  const padding = { bottom: 34, left: 46, right: 16, top: 20 };
+  const firstSeries = series[0];
+  const labels = firstSeries?.points.map((point) => point.label) ?? [];
+  const pointCount = labels.length;
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+  const maxValue = Math.max(
+    1,
+    ...series.flatMap((item) => item.points.map((point) => point[metric] ?? 0)),
+  );
+
+  const getX = (index: number) => {
+    if (pointCount <= 1) {
+      return padding.left + chartWidth / 2;
+    }
+
+    return padding.left + (chartWidth / (pointCount - 1)) * index;
+  };
+
+  const getY = (value: number) => {
+    return padding.top + chartHeight - (value / maxValue) * chartHeight;
+  };
+
+  return (
+    <div className="bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark p-6 shadow-sm">
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <h3 className="text-lg font-semibold font-serif text-text-light dark:text-text-dark">
+          {title}
+        </h3>
+        <div className="text-xs text-secondary">悬停节点可查看明细</div>
+      </div>
+      {series.length && pointCount ? (
+        <div className="relative">
+          <svg
+            aria-label={title}
+            className="w-full h-auto overflow-visible"
+            viewBox={`0 0 ${width} ${height}`}
+          >
+            {Array.from({ length: 4 }, (_, index) => {
+              const value = (maxValue / 4) * (index + 1);
+              const y = getY(value);
+
+              return (
+                <g key={`grid-${value}`}>
+                  <line
+                    x1={padding.left}
+                    x2={width - padding.right}
+                    y1={y}
+                    y2={y}
+                    className="stroke-border-light dark:stroke-border-dark"
+                    strokeDasharray="4 6"
+                  />
+                  <text
+                    x={padding.left - 10}
+                    y={y + 4}
+                    className="fill-secondary text-[10px]"
+                    textAnchor="end"
+                  >
+                    {formatNumber(Math.round(value))}
+                  </text>
+                </g>
+              );
+            })}
+            {series.map((item, seriesIndex) => {
+              const color = CHART_COLORS[seriesIndex % CHART_COLORS.length];
+              const path = item.points
+                .map((point, pointIndex) => {
+                  const x = getX(pointIndex);
+                  const y = getY(point[metric] ?? 0);
+                  return `${pointIndex === 0 ? 'M' : 'L'} ${x} ${y}`;
+                })
+                .join(' ');
+
+              return (
+                <g key={item.model}>
+                  <path d={path} fill="none" stroke={color} strokeWidth="3" />
+                  {item.points.map((point, pointIndex) => {
+                    const value = point[metric] ?? 0;
+                    const x = getX(pointIndex);
+                    const y = getY(value);
+
+                    return (
+                      <circle
+                        key={`${item.model}-${point.start}`}
+                        cx={x}
+                        cy={y}
+                        fill={color}
+                        r="5"
+                        tabIndex={0}
+                        onBlur={() => {
+                          onHoverPoint(null);
+                        }}
+                        onFocus={() => {
+                          onHoverPoint({
+                            chart,
+                            label: point.label,
+                            metricLabel:
+                              metric === 'callCount' ? '调用次数' : '总 Tokens',
+                            model: item.model,
+                            value,
+                            x,
+                            y,
+                          });
+                        }}
+                        onMouseEnter={() => {
+                          onHoverPoint({
+                            chart,
+                            label: point.label,
+                            metricLabel:
+                              metric === 'callCount' ? '调用次数' : '总 Tokens',
+                            model: item.model,
+                            value,
+                            x,
+                            y,
+                          });
+                        }}
+                        onMouseLeave={() => {
+                          onHoverPoint(null);
+                        }}
+                      />
+                    );
+                  })}
+                </g>
+              );
+            })}
+            {labels.map((label, index) => (
+              <text
+                key={`${title}-${label}`}
+                x={getX(index)}
+                y={height - 10}
+                className="fill-secondary text-[10px]"
+                textAnchor="middle"
+              >
+                {label}
+              </text>
+            ))}
+          </svg>
+          {hoveredPoint?.chart === chart ? (
+            <div
+              className="pointer-events-none absolute z-10 min-w-44 -translate-x-1/2 -translate-y-full border border-primary/30 bg-card-light dark:bg-card-dark px-3 py-2 text-xs text-text-light dark:text-text-dark shadow-lg"
+              // eslint-disable-next-line react/forbid-dom-props
+              style={{
+                left: `${(hoveredPoint.x / width) * 100}%`,
+                top: `${(hoveredPoint.y / height) * 100}%`,
+              }}
+            >
+              <div className="font-semibold">{hoveredPoint.model}</div>
+              <div className="mt-1 text-secondary">{hoveredPoint.label}</div>
+              <div className="mt-1">
+                {hoveredPoint.metricLabel}:{' '}
+                <span className="font-semibold">
+                  {formatNumber(hoveredPoint.value)}
+                </span>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <div className="text-center py-12 text-secondary">
+          <i className="fas fa-chart-line"></i>
+          <div className="mt-2">{emptyLabel}</div>
+        </div>
+      )}
+      {series.length ? (
+        <div className="flex flex-wrap gap-3 mt-4">
+          {series.map((item, index) => (
+            <div key={item.model} className="flex items-center gap-2 text-sm">
+              <span
+                className="w-3 h-3"
+                // eslint-disable-next-line react/forbid-dom-props
+                style={{
+                  backgroundColor: CHART_COLORS[index % CHART_COLORS.length],
+                }}
+              ></span>
+              <span className="text-text-light dark:text-text-dark">
+                {item.model}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 };
 
 const SettingsInput = ({
@@ -989,6 +1241,251 @@ export const DashboardSection = ({
                     className="p-3 px-4 border-b border-border-light dark:border-border-dark text-center"
                   >
                     暂无凭证使用记录
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export const UsageSection = ({
+  onAccessKeyChange,
+  onClearHistory,
+  onCloseAutoRefresh,
+  onCredentialChange,
+  onHoverPoint,
+  onRangeChange,
+  onRefresh,
+  onAutoRefreshSecondsChange,
+  state,
+}: UsageSectionProps) => {
+  return (
+    <div id="usage" className="block">
+      {state.autoRefreshVisible ? (
+        <div className="mb-6 p-4 border border-border-light dark:border-border-dark bg-card-light dark:bg-card-dark flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3 text-sm text-text-light dark:text-text-dark">
+            <span className="inline-flex items-center gap-2">
+              <i className="fas fa-sync-alt text-primary"></i>
+              Usage 自动刷新默认已开启
+            </span>
+            <label className="inline-flex items-center gap-2 text-secondary">
+              自动刷新
+              <select
+                aria-label="Usage auto refresh interval"
+                className="bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark text-text-light dark:text-text-dark px-3 py-2 cursor-pointer transition-all hover:border-primary focus:outline-none focus:border-primary focus:ring-3 focus:ring-primary/10"
+                value={state.autoRefreshSeconds}
+                onChange={(event) => {
+                  onAutoRefreshSecondsChange(Number(event.target.value));
+                }}
+              >
+                {USAGE_AUTO_REFRESH_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <button
+            className="inline-flex items-center gap-2 px-4 py-2 border border-border-light dark:border-border-dark text-secondary hover:text-text-light dark:hover:text-text-dark"
+            onClick={onCloseAutoRefresh}
+            type="button"
+          >
+            <i className="fas fa-times"></i>
+            关闭提示
+          </button>
+        </div>
+      ) : null}
+
+      <div className="bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark p-6 mb-6 shadow-sm">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-4 flex-1">
+            <label className="block">
+              <div className="mb-2 text-sm font-medium text-text-light dark:text-text-dark">
+                时间范围
+              </div>
+              <select
+                aria-label="Usage range"
+                className="w-full p-3 border border-border-light dark:border-border-dark bg-card-light dark:bg-card-dark text-text-light dark:text-text-dark focus:outline-none focus:border-primary focus:ring-3 focus:ring-primary/10"
+                value={state.request.range}
+                onChange={(event) => {
+                  onRangeChange(event.target.value as UsageRange);
+                }}
+              >
+                {USAGE_RANGE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <div className="mb-2 text-sm font-medium text-text-light dark:text-text-dark">
+                Credential
+              </div>
+              <select
+                aria-label="Usage credential filter"
+                className="w-full p-3 border border-border-light dark:border-border-dark bg-card-light dark:bg-card-dark text-text-light dark:text-text-dark focus:outline-none focus:border-primary focus:ring-3 focus:ring-primary/10"
+                value={state.request.credential}
+                onChange={(event) => {
+                  onCredentialChange(event.target.value);
+                }}
+              >
+                {state.filters.credentials.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <div className="mb-2 text-sm font-medium text-text-light dark:text-text-dark">
+                Access Key
+              </div>
+              <select
+                aria-label="Usage access key filter"
+                className="w-full p-3 border border-border-light dark:border-border-dark bg-card-light dark:bg-card-dark text-text-light dark:text-text-dark focus:outline-none focus:border-primary focus:ring-3 focus:ring-primary/10"
+                value={state.request.accessKey}
+                onChange={(event) => {
+                  onAccessKeyChange(event.target.value);
+                }}
+              >
+                {state.filters.accessKeys.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <button
+              className="inline-flex items-center gap-2 px-6 py-3 border-none font-medium cursor-pointer transition-all text-sm bg-primary text-white hover:bg-primary-dark"
+              onClick={onRefresh}
+              type="button"
+            >
+              <i
+                className={
+                  state.loading ? 'fas fa-spinner fa-spin' : 'fas fa-sync-alt'
+                }
+              ></i>
+              刷新
+            </button>
+            <button
+              className="inline-flex items-center gap-2 px-6 py-3 border-none font-medium cursor-pointer transition-all text-sm bg-error text-white hover:bg-error"
+              onClick={onClearHistory}
+              type="button"
+            >
+              <i className="fas fa-trash-alt"></i>
+              清空历史
+            </button>
+          </div>
+        </div>
+        <div className="mt-4 text-sm text-secondary">
+          {state.lastUpdatedAt
+            ? `最后更新于 ${state.lastUpdatedAt}`
+            : '等待首次加载 Usage 数据'}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-6 mb-6">
+        <div className="bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark p-6 shadow-sm">
+          <div className="text-sm text-secondary mb-2">今日调用次数</div>
+          <div className="text-3xl font-bold text-text-light dark:text-text-dark">
+            {formatNumber(state.todaySummary.callCount)}
+          </div>
+        </div>
+        <div className="bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark p-6 shadow-sm">
+          <div className="text-sm text-secondary mb-2">今日总 Tokens</div>
+          <div className="text-3xl font-bold text-text-light dark:text-text-dark">
+            {formatNumber(state.todaySummary.totalTokens)}
+          </div>
+        </div>
+        <div className="bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark p-6 shadow-sm">
+          <div className="text-sm text-secondary mb-2">
+            今日 Cache 命中 Tokens
+          </div>
+          <div className="text-3xl font-bold text-text-light dark:text-text-dark">
+            {formatNumber(state.todaySummary.cacheHitTokens)}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-6 mb-6">
+        {renderUsageChart({
+          chart: 'calls',
+          emptyLabel: '当前筛选条件下暂无调用趋势数据',
+          hoveredPoint: state.hoveredPoint,
+          metric: 'callCount',
+          onHoverPoint,
+          series: state.callSeries,
+          title: '调用次数趋势',
+        })}
+        {renderUsageChart({
+          chart: 'tokens',
+          emptyLabel: '当前筛选条件下暂无 Token 趋势数据',
+          hoveredPoint: state.hoveredPoint,
+          metric: 'totalTokens',
+          onHoverPoint,
+          series: state.tokenSeries,
+          title: 'Token 消耗趋势',
+        })}
+      </div>
+
+      <div className="bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark p-6 shadow-sm">
+        <div className="flex justify-between items-center mb-4 pb-4 border-b border-border-light dark:border-border-dark">
+          <h3 className="text-lg font-semibold font-serif text-text-light dark:text-text-dark">
+            <i className="fas fa-table"></i>
+            模型汇总
+          </h3>
+        </div>
+        <div className="w-full overflow-x-auto">
+          <table className="w-full border-collapse mt-4">
+            <thead>
+              <tr>
+                <th className="p-3 px-4 text-left font-semibold bg-bg-light dark:bg-bg-dark border-b border-border-light dark:border-border-dark">
+                  模型
+                </th>
+                <th className="p-3 px-4 text-right font-semibold bg-bg-light dark:bg-bg-dark border-b border-border-light dark:border-border-dark">
+                  调用次数
+                </th>
+                <th className="p-3 px-4 text-right font-semibold bg-bg-light dark:bg-bg-dark border-b border-border-light dark:border-border-dark">
+                  总 Tokens
+                </th>
+                <th className="p-3 px-4 text-right font-semibold bg-bg-light dark:bg-bg-dark border-b border-border-light dark:border-border-dark">
+                  Cache 命中
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {state.tableRows.length ? (
+                state.tableRows.map((row) => (
+                  <tr key={row.model}>
+                    <td className="p-3 px-4 border-b border-border-light dark:border-border-dark">
+                      {row.model}
+                    </td>
+                    <td className="p-3 px-4 border-b border-border-light dark:border-border-dark text-right">
+                      {formatNumber(row.callCount)}
+                    </td>
+                    <td className="p-3 px-4 border-b border-border-light dark:border-border-dark text-right">
+                      {formatNumber(row.totalTokens)}
+                    </td>
+                    <td className="p-3 px-4 border-b border-border-light dark:border-border-dark text-right">
+                      {formatNumber(row.cacheHitTokens)}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td
+                    colSpan={4}
+                    className="p-3 px-4 border-b border-border-light dark:border-border-dark text-center"
+                  >
+                    暂无模型汇总数据
                   </td>
                 </tr>
               )}

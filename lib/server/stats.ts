@@ -1,54 +1,36 @@
-interface UsageStats {
-  modelUsage: Record<string, number>;
-  credentialUsage: Record<string, number>;
-}
-
-interface StatsStore {
-  stats: UsageStats;
-}
-
-const globalStats = globalThis as typeof globalThis & {
-  __codebuddy2apiStats__?: StatsStore;
-};
-
-const getStatsStore = (): StatsStore => {
-  if (!globalStats.__codebuddy2apiStats__) {
-    globalStats.__codebuddy2apiStats__ = {
-      stats: {
-        modelUsage: {},
-        credentialUsage: {},
-      },
-    };
-  }
-
-  return globalStats.__codebuddy2apiStats__;
-};
-
-export const recordModelUsage = (model: string): void => {
-  const store = getStatsStore();
-  store.stats.modelUsage[model] = (store.stats.modelUsage[model] ?? 0) + 1;
-};
-
-export const recordCredentialUsage = (credentialId: string): void => {
-  const store = getStatsStore();
-  store.stats.credentialUsage[credentialId] =
-    (store.stats.credentialUsage[credentialId] ?? 0) + 1;
-};
+import { listCredentialFilenames } from './credentials';
+import { getUsageAnalytics, resetUsageHistory } from './usage';
 
 export const getUsageStats = (): {
-  model_usage: Record<string, number>;
   credential_usage: Record<string, number>;
+  model_usage: Record<string, number>;
 } => {
-  const store = getStatsStore();
+  const analytics = getUsageAnalytics({
+    range: '7d',
+  });
+  const modelUsage = analytics.tableRows.reduce<Record<string, number>>(
+    (result, row) => {
+      result[row.model] = row.callCount;
+      return result;
+    },
+    {},
+  );
+  const existingCredentialSet = new Set(listCredentialFilenames());
+  const credentialUsage = analytics.filters.credentials
+    .filter(
+      (item) => item.value !== 'all' && existingCredentialSet.has(item.value),
+    )
+    .reduce<Record<string, number>>((result, item) => {
+      result[item.value] = analytics.credentialCallCounts[item.value] ?? 0;
+      return result;
+    }, {});
 
   return {
-    model_usage: { ...store.stats.modelUsage },
-    credential_usage: { ...store.stats.credentialUsage },
+    credential_usage: credentialUsage,
+    model_usage: modelUsage,
   };
 };
 
 export const resetUsageStats = (): void => {
-  const store = getStatsStore();
-  store.stats.modelUsage = {};
-  store.stats.credentialUsage = {};
+  resetUsageHistory();
 };

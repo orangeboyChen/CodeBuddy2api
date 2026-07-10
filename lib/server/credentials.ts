@@ -6,7 +6,6 @@ import {
   removeCredentialReferencesFromAccessKeys,
 } from './access-keys';
 import { getCredsDir } from './config';
-import { recordCredentialUsage } from './stats';
 
 export type CredentialData = Record<string, unknown> & {
   access_token?: string;
@@ -563,7 +562,6 @@ export const resolveCredentialForRequest = ({
   }
 
   saveRuntimeState();
-  recordCredentialUsage(current.filename);
 
   return current;
 };

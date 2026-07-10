@@ -71,6 +71,7 @@ export interface UsageFilterOptions {
 
 export interface UsageAnalyticsResponse {
   callSeries: UsageChartSeries[];
+  credentialCallCounts: Record<string, number>;
   filters: UsageFilterOptions;
   range: UsageRange;
   tableRows: UsageTableRow[];
@@ -88,6 +89,10 @@ const getUsageDir = (): string => {
 
 const getUsagePath = (): string => {
   return path.join(getUsageDir(), 'history.json');
+};
+
+const getUsageTempPath = (): string => {
+  return path.join(getUsageDir(), 'history.json.tmp');
 };
 
 const ensureConfigDir = (): void => {
@@ -131,14 +136,41 @@ const normalizeUsage = (usage: UsageSnapshot): UsageEventRecord => {
   };
 };
 
-const isUsageEventRecord = (value: unknown): value is UsageEventRecord => {
-  return Boolean(
-    value &&
-    typeof value === 'object' &&
-    typeof (value as UsageEventRecord).timestamp === 'string' &&
-    typeof (value as UsageEventRecord).model === 'string' &&
-    typeof (value as UsageEventRecord).route === 'string',
-  );
+const normalizeStoredEvent = (value: unknown): UsageEventRecord | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const record = value as Partial<UsageEventRecord>;
+
+  if (
+    typeof record.timestamp !== 'string' ||
+    !Number.isFinite(Date.parse(record.timestamp)) ||
+    typeof record.model !== 'string' ||
+    typeof record.route !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    accessKeyId:
+      typeof record.accessKeyId === 'string' ? record.accessKeyId : null,
+    accessKeyName:
+      typeof record.accessKeyName === 'string' ? record.accessKeyName : null,
+    cacheCreationTokens: toNumber(record.cacheCreationTokens),
+    cacheReadTokens: toNumber(record.cacheReadTokens),
+    callCount: Math.max(1, Math.floor(toNumber(record.callCount) || 1)),
+    credentialFilename:
+      typeof record.credentialFilename === 'string'
+        ? record.credentialFilename
+        : null,
+    inputTokens: toNumber(record.inputTokens),
+    model: record.model.trim() || 'unknown',
+    outputTokens: toNumber(record.outputTokens),
+    route: record.route,
+    timestamp: record.timestamp,
+    totalTokens: toNumber(record.totalTokens),
+  };
 };
 
 const trimExpiredEvents = (events: UsageEventRecord[], nowMs: number) => {
@@ -173,7 +205,9 @@ const readUsageStore = (): UsageStore => {
 
     const parsed = JSON.parse(content) as Partial<UsageStore>;
     const events = Array.isArray(parsed.events)
-      ? parsed.events.filter(isUsageEventRecord)
+      ? parsed.events
+          .map((event) => normalizeStoredEvent(event))
+          .filter((event): event is UsageEventRecord => event !== null)
       : [];
 
     return {
@@ -188,7 +222,9 @@ const readUsageStore = (): UsageStore => {
 
 const writeUsageStore = (store: UsageStore): void => {
   ensureConfigDir();
-  fs.writeFileSync(getUsagePath(), JSON.stringify(store, null, 2));
+  const content = JSON.stringify(store, null, 2);
+  fs.writeFileSync(getUsageTempPath(), content);
+  fs.renameSync(getUsageTempPath(), getUsagePath());
 };
 
 const persistTrimmedStore = (nowMs: number): UsageStore => {
@@ -220,11 +256,12 @@ const getRangeWindow = (
   if (range === 'today') {
     const start = new Date(now);
     start.setHours(0, 0, 0, 0);
+    const elapsedHours = Math.floor((nowMs - start.getTime()) / HOUR_MS) + 1;
 
     return {
-      bucketCount: Math.max(1, now.getHours() + 1),
+      bucketCount: elapsedHours,
       bucketSizeMs: HOUR_MS,
-      endMs: nowMs,
+      endMs: nowMs + 1,
       startMs: start.getTime(),
     };
   }
@@ -258,8 +295,8 @@ const getRangeWindow = (
   return {
     bucketCount,
     bucketSizeMs,
-    endMs: nowMs,
-    startMs: nowMs - bucketCount * bucketSizeMs,
+    endMs: nowMs + 1,
+    startMs: nowMs - bucketCount * bucketSizeMs + 1,
   };
 };
 
@@ -343,15 +380,35 @@ const createEmptyTotals = (): UsageBucketTotals => ({
   totalTokens: 0,
 });
 
+const createEmptyBucketTotals = (count: number): UsageBucketTotals[] => {
+  return Array.from({ length: count }, () => createEmptyTotals());
+};
+
 const addEventToTotals = (
   totals: UsageBucketTotals,
   event: UsageEventRecord,
 ): UsageBucketTotals => ({
   callCount: totals.callCount + event.callCount,
-  cacheHitTokens:
-    totals.cacheHitTokens + event.cacheReadTokens + event.cacheCreationTokens,
+  cacheHitTokens: totals.cacheHitTokens + event.cacheReadTokens,
   totalTokens: totals.totalTokens + event.totalTokens,
 });
+
+const mergeFilterOptions = (
+  current: UsageFilterOption[],
+  history: UsageFilterOption[],
+): UsageFilterOption[] => {
+  const merged = new Map<string, UsageFilterOption>();
+
+  [...current, ...history].forEach((item) => {
+    if (!item.value.trim() || merged.has(item.value)) {
+      return;
+    }
+
+    merged.set(item.value, item);
+  });
+
+  return [...merged.values()];
+};
 
 export const recordUsageEvent = ({
   accessKeyId,
@@ -387,9 +444,9 @@ export const recordUsageEvent = ({
 
   const nowMs = Date.now();
   const store = persistTrimmedStore(nowMs);
-  store.events.push(event);
+  const events = trimExpiredEvents([...store.events, event], nowMs);
   writeUsageStore({
-    events: store.events,
+    events,
   });
 };
 
@@ -416,6 +473,7 @@ export const getUsageAnalytics = ({
   const tokenSeriesByModel = new Map<string, UsageBucketTotals[]>();
   const callSeriesByModel = new Map<string, UsageBucketTotals[]>();
   const tableRowsByModel = new Map<string, UsageBucketTotals>();
+  const credentialCallCounts: Record<string, number> = {};
   const todaySummary = createEmptyTotals();
   const todayBounds = getTodayBounds(now);
   const { endMs, startMs } = getRangeWindow(range, now);
@@ -429,6 +487,11 @@ export const getUsageAnalytics = ({
 
     if (!matchesFilter(event, accessKey, credential)) {
       return;
+    }
+
+    if (event.credentialFilename) {
+      credentialCallCounts[event.credentialFilename] =
+        (credentialCallCounts[event.credentialFilename] ?? 0) + event.callCount;
     }
 
     if (eventMs >= todayBounds.startMs && eventMs < todayBounds.endMs) {
@@ -450,10 +513,10 @@ export const getUsageAnalytics = ({
 
     const tokenBuckets =
       tokenSeriesByModel.get(event.model) ??
-      Array.from({ length: buckets.length }, () => createEmptyTotals());
+      createEmptyBucketTotals(buckets.length);
     const callBuckets =
       callSeriesByModel.get(event.model) ??
-      Array.from({ length: buckets.length }, () => createEmptyTotals());
+      createEmptyBucketTotals(buckets.length);
     const tableTotals =
       tableRowsByModel.get(event.model) ?? createEmptyTotals();
 
@@ -473,46 +536,86 @@ export const getUsageAnalytics = ({
 
   const toSeries = (
     modelMap: Map<string, UsageBucketTotals[]>,
-    metric: 'tokens' | 'calls',
   ): UsageChartSeries[] => {
     return [...modelMap.entries()]
       .sort((left, right) => left[0].localeCompare(right[0]))
       .map(([model, points]) => ({
         model,
         points: points.map((point, index) => ({
-          callCount: metric === 'calls' ? point.callCount : point.callCount,
+          callCount: point.callCount,
           cacheHitTokens: point.cacheHitTokens,
           label: buckets[index].label,
           start: buckets[index].start,
-          totalTokens:
-            metric === 'tokens' ? point.totalTokens : point.totalTokens,
+          totalTokens: point.totalTokens,
         })),
       }));
   };
 
+  const accessKeyHistoryOptions = [...store.events]
+    .filter(
+      (
+        event,
+      ): event is UsageEventRecord & {
+        accessKeyId: string;
+        accessKeyName: string;
+      } =>
+        typeof event.accessKeyId === 'string' &&
+        event.accessKeyId.length > 0 &&
+        typeof event.accessKeyName === 'string' &&
+        event.accessKeyName.length > 0,
+    )
+    .map((event) => ({
+      label: event.accessKeyName,
+      value: event.accessKeyId,
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+
+  const credentialHistoryOptions = [
+    ...new Set(
+      store.events
+        .map((event) => event.credentialFilename)
+        .filter(
+          (value): value is string =>
+            typeof value === 'string' && value.length > 0,
+        ),
+    ),
+  ]
+    .sort((left, right) => left.localeCompare(right))
+    .map((value) => ({
+      label: value,
+      value,
+    }));
+
   return {
-    callSeries: toSeries(callSeriesByModel, 'calls'),
+    callSeries: toSeries(callSeriesByModel),
+    credentialCallCounts,
     filters: {
-      accessKeys: [
-        {
-          label: '全部 API Key',
-          value: 'all',
-        },
-        ...listAccessKeys().access_keys.map((item) => ({
-          label: item.name,
-          value: item.id,
-        })),
-      ],
-      credentials: [
-        {
-          label: '全部凭据',
-          value: 'all',
-        },
-        ...listCredentialFilenames().map((filename) => ({
-          label: filename,
-          value: filename,
-        })),
-      ],
+      accessKeys: mergeFilterOptions(
+        [
+          {
+            label: '全部 API Key',
+            value: 'all',
+          },
+          ...listAccessKeys().access_keys.map((item) => ({
+            label: item.name,
+            value: item.id,
+          })),
+        ],
+        accessKeyHistoryOptions,
+      ),
+      credentials: mergeFilterOptions(
+        [
+          {
+            label: '全部凭据',
+            value: 'all',
+          },
+          ...listCredentialFilenames().map((filename) => ({
+            label: filename,
+            value: filename,
+          })),
+        ],
+        credentialHistoryOptions,
+      ),
     },
     range,
     tableRows: [...tableRowsByModel.entries()]
@@ -522,7 +625,7 @@ export const getUsageAnalytics = ({
       }))
       .sort((left, right) => right.totalTokens - left.totalTokens),
     todaySummary,
-    tokenSeries: toSeries(tokenSeriesByModel, 'tokens'),
+    tokenSeries: toSeries(tokenSeriesByModel),
   };
 };
 

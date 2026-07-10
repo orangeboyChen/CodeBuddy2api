@@ -929,6 +929,7 @@ const createResponsesEventStream = async (
     },
     proxyContext,
     debugTrace,
+    '/v1/responses',
   );
 
   if (!upstreamResponse.ok || !upstreamResponse.body) {
@@ -1361,6 +1362,7 @@ export const handleResponsesRequest = async (
       },
       proxyContext,
       debugTrace,
+      '/v1/responses',
     );
 
     if (!upstreamResponse.ok) {

@@ -134,6 +134,131 @@ const recordProxyUsage = ({
   });
 };
 
+const extractResponsesUsage = (value: unknown): unknown => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const payload = value as {
+    response?: {
+      usage?: unknown;
+    };
+    usage?: unknown;
+  };
+
+  return payload.response?.usage ?? payload.usage ?? null;
+};
+
+const parseUsageHeader = (response: Response): unknown => {
+  const usageHeader = response.headers.get('x-codebuddy-usage');
+
+  if (!usageHeader) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(usageHeader) as unknown;
+  } catch {
+    return null;
+  }
+};
+
+const trackResponsesUsageStream = ({
+  fallbackUsage,
+  model,
+  proxyContext,
+  upstreamResponse,
+}: {
+  fallbackUsage: unknown;
+  model: string;
+  proxyContext: ProxyContext;
+  upstreamResponse: Response;
+}): Response => {
+  if (!upstreamResponse.body) {
+    recordProxyUsage({
+      model,
+      proxyContext,
+      route: '/v1/responses',
+      usage: fallbackUsage,
+    });
+
+    return new Response(null, {
+      headers: upstreamResponse.headers,
+      status: upstreamResponse.status,
+    });
+  }
+
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start: (controller) => {
+      const reader = upstreamResponse.body!.getReader();
+      let buffer = '';
+      let latestUsage = fallbackUsage;
+
+      const inspectFrame = (frame: string): void => {
+        frame.split('\n').forEach((line) => {
+          if (!line.startsWith('data:')) {
+            return;
+          }
+
+          const raw = line.slice(5).trim();
+
+          if (!raw || raw === '[DONE]') {
+            return;
+          }
+
+          try {
+            latestUsage =
+              extractResponsesUsage(JSON.parse(raw) as unknown) ?? latestUsage;
+          } catch {
+            // Preserve malformed upstream frames without recording them.
+          }
+        });
+      };
+
+      const pump = async (): Promise<void> => {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          if (buffer) {
+            inspectFrame(buffer);
+            controller.enqueue(encoder.encode(buffer));
+          }
+
+          recordProxyUsage({
+            model,
+            proxyContext,
+            route: '/v1/responses',
+            usage: latestUsage,
+          });
+          controller.close();
+          return;
+        }
+
+        const text = decoder.decode(value, { stream: true });
+        buffer += text;
+        const frames = buffer.split('\n\n');
+        buffer = frames.pop() ?? '';
+
+        frames.forEach((frame) => {
+          inspectFrame(frame);
+          controller.enqueue(encoder.encode(`${frame}\n\n`));
+        });
+
+        await pump();
+      };
+
+      void pump();
+    },
+  });
+
+  return new Response(stream, {
+    headers: upstreamResponse.headers,
+    status: upstreamResponse.status,
+  });
+};
+
 const logUpstreamFailure = ({
   detail,
   error,
@@ -851,6 +976,7 @@ export const proxyChatCompletions = async (
   body: ChatRequestBody,
   context?: ProxyContext,
   debugTrace?: DebugTrace,
+  usageRoute = '/v1/chat/completions',
 ): Promise<Response> => {
   if (!body.messages?.length) {
     return createErrorResponse(400, 'messages is required');
@@ -898,7 +1024,7 @@ export const proxyChatCompletions = async (
       return normalizeStreamingResponse({
         model: String(upstreamBody.model ?? 'unknown'),
         proxyContext: resolvedContext,
-        route: '/v1/chat/completions',
+        route: usageRoute,
         upstreamResponse,
       });
     }
@@ -918,7 +1044,7 @@ export const proxyChatCompletions = async (
       recordProxyUsage({
         model: String(upstreamBody.model ?? 'unknown'),
         proxyContext: resolvedContext,
-        route: '/v1/chat/completions',
+        route: usageRoute,
         usage,
       });
 
@@ -938,7 +1064,7 @@ export const proxyChatCompletions = async (
     recordProxyUsage({
       model: aggregated.model,
       proxyContext: resolvedContext,
-      route: '/v1/chat/completions',
+      route: usageRoute,
       usage: aggregated.usage,
     });
 
@@ -1006,6 +1132,51 @@ export const proxyResponsesUpstream = async (
         detail,
       );
     }
+
+    const model = String(upstreamBody.model ?? 'unknown');
+    const fallbackUsage = parseUsageHeader(upstreamResponse);
+    const contentType = upstreamResponse.headers.get('content-type') ?? '';
+
+    if (contentType.toLowerCase().includes('application/json')) {
+      const payloadText = await upstreamResponse.text();
+      let usage = fallbackUsage;
+
+      try {
+        usage =
+          extractResponsesUsage(JSON.parse(payloadText) as unknown) ??
+          fallbackUsage;
+      } catch {
+        // Preserve malformed upstream JSON while retaining header usage.
+      }
+
+      recordProxyUsage({
+        model,
+        proxyContext: resolvedContext,
+        route: '/v1/responses',
+        usage,
+      });
+
+      return new Response(payloadText, {
+        headers: upstreamResponse.headers,
+        status: upstreamResponse.status,
+      });
+    }
+
+    if (contentType.toLowerCase().includes('text/event-stream')) {
+      return trackResponsesUsageStream({
+        fallbackUsage,
+        model,
+        proxyContext: resolvedContext,
+        upstreamResponse,
+      });
+    }
+
+    recordProxyUsage({
+      model,
+      proxyContext: resolvedContext,
+      route: '/v1/responses',
+      usage: fallbackUsage,
+    });
 
     return new Response(upstreamResponse.body, {
       status: upstreamResponse.status,

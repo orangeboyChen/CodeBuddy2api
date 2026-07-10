@@ -15,6 +15,8 @@ import * as AdminCredentialsSelectRoute from '@/app/admin-api/credentials/select
 import * as AdminCredentialsToggleRoute from '@/app/admin-api/credentials/toggle-rotation/route';
 import * as AdminSettingsRoute from '@/app/admin-api/settings/route';
 import * as AdminStatsRoute from '@/app/admin-api/stats/route';
+import * as AdminUsageClearRoute from '@/app/admin-api/usage/clear/route';
+import * as AdminUsageRoute from '@/app/admin-api/usage/route';
 import * as ApiSettingsRoute from '@/app/api/settings/route';
 import * as CallbackRoute from '@/app/codebuddy/auth/callback/route';
 import * as PollRoute from '@/app/codebuddy/auth/poll/route';
@@ -32,6 +34,7 @@ import * as V1ResponsesRoute from '@/app/v1/responses/route';
 import { resetCredentialRuntimeState } from '@/lib/server/credentials';
 import { resetResponseSessions } from '@/lib/server/responses';
 import { resetUsageStats } from '@/lib/server/stats';
+import { recordUsageEvent } from '@/lib/server/usage';
 
 const repoRoot = process.cwd();
 const tempRootDir = path.join(repoRoot, '.tmp-test-runtime-root');
@@ -185,6 +188,13 @@ describe('server runtime', () => {
     ).json();
     expect(updatedAccessKeyPayload.access_key.name).toBe('Alice Key Updated');
 
+    const accessKeyListBeforeDelete = await (
+      await AdminAccessKeysRoute.GET()
+    ).json();
+    expect(
+      accessKeyListBeforeDelete.access_keys[0].credentialFilenames,
+    ).toEqual([listPayload.credentials[0].filename]);
+
     const invalidSelectResponse = await AdminCredentialsSelectRoute.POST(
       makeJsonRequest('http://localhost/admin-api/credentials/select', {
         index: null,
@@ -217,6 +227,11 @@ describe('server runtime', () => {
       )
     ).json();
     expect(deletePayload.success).toBe(true);
+
+    const accessKeyListAfterDelete = await (
+      await AdminAccessKeysRoute.GET()
+    ).json();
+    expect(accessKeyListAfterDelete.access_keys).toEqual([]);
   });
 
   it('enforces auth on protected v1 routes and mirrors successful actions', async () => {
@@ -337,12 +352,22 @@ describe('server runtime', () => {
   });
 
   it('proxies chat completions for admin and v1 endpoints', async () => {
-    await AdminCredentialsRoute.POST(
-      makeJsonRequest('http://localhost/admin-api/credentials', {
-        bearer_token: 'chat-token',
-        user_id: 'chat@example.com',
-      }),
-    );
+    const adminCredentialPayload = await (
+      await AdminCredentialsRoute.POST(
+        makeJsonRequest('http://localhost/admin-api/credentials', {
+          bearer_token: 'chat-token',
+          user_id: 'chat@example.com',
+        }),
+      )
+    ).json();
+    const accessKeyPayload = await (
+      await AdminAccessKeysRoute.POST(
+        makeJsonRequest('http://localhost/admin-api/access-keys', {
+          credential_filenames: [adminCredentialPayload.filename],
+          name: 'Chat Proxy Key',
+        }),
+      )
+    ).json();
 
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
@@ -375,7 +400,7 @@ describe('server runtime', () => {
       makeNextRequest('http://localhost/v1/chat/completions', {
         method: 'POST',
         headers: {
-          authorization: 'Bearer ignored-without-access-key',
+          authorization: `Bearer ${accessKeyPayload.secret}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -393,13 +418,73 @@ describe('server runtime', () => {
     ).toBe(true);
   });
 
-  it('supports responses api for non-stream, stream, tool flattening, and previous response state', async () => {
-    await AdminCredentialsRoute.POST(
-      makeJsonRequest('http://localhost/admin-api/credentials', {
-        bearer_token: 'responses-token',
-        user_id: 'responses@example.com',
+  it('falls back to the default model when clients send a blank model', async () => {
+    const credentialPayload = await (
+      await AdminCredentialsRoute.POST(
+        makeJsonRequest('http://localhost/admin-api/credentials', {
+          bearer_token: 'blank-model-token',
+          user_id: 'blank-model@example.com',
+        }),
+      )
+    ).json();
+    const accessKeyPayload = await (
+      await AdminAccessKeysRoute.POST(
+        makeJsonRequest('http://localhost/admin-api/access-keys', {
+          credential_filenames: [credentialPayload.filename],
+          name: 'Blank Model Key',
+        }),
+      )
+    ).json();
+
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () =>
+        makeSseResponse([
+          'data: {"id":"chatcmpl_blank","object":"chat.completion.chunk","model":"glm-5.1","choices":[{"delta":{"content":"ok"}}]}\n\n',
+          'data: {"choices":[{"finish_reason":"stop"}],"usage":{"completion_tokens":1,"prompt_tokens":1,"total_tokens":2}}\n\n',
+          'data: [DONE]\n\n',
+        ]),
+      );
+
+    const response = await V1ChatRoute.POST(
+      makeNextRequest('http://localhost/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${accessKeyPayload.secret}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: '',
+          messages: [{ role: 'user', content: 'hello' }],
+          stream: false,
+        }),
       }),
     );
+
+    expect(response.status).toBe(200);
+    expect(
+      JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))
+        .model,
+    ).toBe('glm-5.1');
+  });
+
+  it('supports responses api for non-stream, stream, tool flattening, and previous response state', async () => {
+    const responsesCredentialPayload = await (
+      await AdminCredentialsRoute.POST(
+        makeJsonRequest('http://localhost/admin-api/credentials', {
+          bearer_token: 'responses-token',
+          user_id: 'responses@example.com',
+        }),
+      )
+    ).json();
+    const accessKeyPayload = await (
+      await AdminAccessKeysRoute.POST(
+        makeJsonRequest('http://localhost/admin-api/access-keys', {
+          credential_filenames: [responsesCredentialPayload.filename],
+          name: 'Responses Proxy Key',
+        }),
+      )
+    ).json();
 
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
@@ -443,7 +528,7 @@ describe('server runtime', () => {
       makeNextRequest('http://localhost/v1/responses', {
         method: 'POST',
         headers: {
-          authorization: 'Bearer secret',
+          authorization: `Bearer ${accessKeyPayload.secret}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -473,7 +558,7 @@ describe('server runtime', () => {
       makeNextRequest('http://localhost/v1/responses', {
         method: 'POST',
         headers: {
-          authorization: 'Bearer secret',
+          authorization: `Bearer ${accessKeyPayload.secret}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -490,7 +575,7 @@ describe('server runtime', () => {
       makeNextRequest('http://localhost/v1/responses', {
         method: 'POST',
         headers: {
-          authorization: 'Bearer secret',
+          authorization: `Bearer ${accessKeyPayload.secret}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -507,7 +592,7 @@ describe('server runtime', () => {
       makeNextRequest('http://localhost/v1/responses', {
         method: 'POST',
         headers: {
-          authorization: 'Bearer secret',
+          authorization: `Bearer ${accessKeyPayload.secret}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -556,7 +641,7 @@ describe('server runtime', () => {
       makeNextRequest('http://localhost/v1/responses', {
         method: 'POST',
         headers: {
-          authorization: 'Bearer secret',
+          authorization: `Bearer ${accessKeyPayload.secret}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -611,7 +696,7 @@ describe('server runtime', () => {
       makeNextRequest('http://localhost/v1/responses', {
         method: 'POST',
         headers: {
-          authorization: 'Bearer secret',
+          authorization: `Bearer ${accessKeyPayload.secret}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -727,5 +812,82 @@ describe('server runtime', () => {
 
     const statsPayload = await (await AdminStatsRoute.GET()).json();
     expect(statsPayload.credential_usage).toBeTruthy();
+  });
+
+  it('serves persisted usage analytics and clears history through admin routes', async () => {
+    const currentTimestamp = new Date();
+    currentTimestamp.setMinutes(Math.max(0, currentTimestamp.getMinutes() - 1));
+
+    recordUsageEvent({
+      accessKeyId: 'key-1',
+      accessKeyName: 'Runtime Key',
+      credentialFilename: 'runtime-credential.json',
+      model: 'glm-5.1',
+      route: '/v1/chat/completions',
+      timestamp: currentTimestamp.toISOString(),
+      usage: {
+        input_tokens: 6,
+        output_tokens: 4,
+      },
+    });
+
+    const invalidResponse = await AdminUsageRoute.GET(
+      makeNextRequest('http://localhost/admin-api/usage?range=10d'),
+    );
+    expect(invalidResponse.status).toBe(400);
+    expect(await invalidResponse.json()).toEqual({
+      error: 'Invalid range',
+    });
+
+    const usageResponse = await AdminUsageRoute.GET(
+      makeNextRequest(
+        'http://localhost/admin-api/usage?range=today&accessKey=key-1&credential=runtime-credential.json',
+      ),
+    );
+    expect(usageResponse.status).toBe(200);
+    const usagePayload = await usageResponse.json();
+    expect(usagePayload.range).toBe('today');
+    expect(usagePayload.tableRows).toEqual([
+      {
+        callCount: 1,
+        cacheHitTokens: 0,
+        model: 'glm-5.1',
+        totalTokens: 10,
+      },
+    ]);
+    expect(usagePayload.filters.accessKeys).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'Runtime Key',
+          value: 'key-1',
+        }),
+      ]),
+    );
+    expect(usagePayload.filters.credentials).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'runtime-credential.json',
+          value: 'runtime-credential.json',
+        }),
+      ]),
+    );
+
+    const clearResponse = await AdminUsageClearRoute.POST();
+    expect(clearResponse.status).toBe(200);
+    expect(await clearResponse.json()).toEqual({
+      success: true,
+    });
+
+    const clearedPayload = await (
+      await AdminUsageRoute.GET(
+        makeNextRequest('http://localhost/admin-api/usage?range=today'),
+      )
+    ).json();
+    expect(clearedPayload.tableRows).toEqual([]);
+    expect(clearedPayload.todaySummary).toEqual({
+      callCount: 0,
+      cacheHitTokens: 0,
+      totalTokens: 0,
+    });
   });
 });

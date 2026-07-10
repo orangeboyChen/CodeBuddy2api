@@ -856,6 +856,7 @@ export const handleMessagesRequest = async (
       chatBody,
       undefined,
       debugTrace,
+      '/v1/messages',
     );
 
     if (!upstreamResponse.ok) {

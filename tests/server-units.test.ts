@@ -12,6 +12,7 @@ import {
   hasAccessKeys,
   listAccessKeys,
   listStoredAccessKeys,
+  removeCredentialReferencesFromAccessKeys,
   updateAccessKey,
 } from '@/lib/server/access-keys';
 import {
@@ -26,7 +27,10 @@ import {
   pollCodeBuddyAuth,
   startCodeBuddyAuth,
 } from '@/lib/server/codebuddy-auth';
-import { proxyChatCompletions } from '@/lib/server/codebuddy';
+import {
+  proxyChatCompletions,
+  proxyResponsesUpstream,
+} from '@/lib/server/codebuddy';
 import {
   addCredential,
   deleteCredentialByIndex,
@@ -38,7 +42,6 @@ import {
   selectCredential,
   toggleAutoRotation,
 } from '@/lib/server/credentials';
-import { createDebugTrace, setDebugUpstreamRequest } from '@/lib/server/debug';
 import {
   handleResponsesRequest,
   resetResponseSessions,
@@ -46,12 +49,24 @@ import {
 } from '@/lib/server/responses';
 import { updateSettings, getActiveConfig } from '@/lib/server/config';
 import { getRequestHeaderMap } from '@/lib/server/http';
+import { getUsageStats, resetUsageStats } from '@/lib/server/stats';
 import {
-  getUsageStats,
-  recordCredentialUsage,
-  recordModelUsage,
-  resetUsageStats,
-} from '@/lib/server/stats';
+  clearDebugLogs,
+  createDebugTrace,
+  enqueueUpstreamResponseSnapshot,
+  finalizeDebugTrace,
+  getDebugSettings,
+  isDebugEnabled,
+  listDebugLogs,
+  setDebugTraceError,
+  setDebugUpstreamRequest,
+  updateDebugSettings,
+} from '@/lib/server/debug';
+import {
+  clearUsageHistory,
+  getUsageAnalytics,
+  recordUsageEvent,
+} from '@/lib/server/usage';
 
 const repoRoot = process.cwd();
 const tempRootDir = path.join(repoRoot, '.tmp-test-config-units-root');
@@ -420,10 +435,271 @@ describe('server units', () => {
       })?.filename,
     ).toBe(keyedCredential.filename);
 
-    recordModelUsage('glm-5.1');
-    recordCredentialUsage('cred-a');
+    recordUsageEvent({
+      credentialFilename: 'cred-a',
+      model: 'glm-5.1',
+      route: '/v1/chat/completions',
+      usage: {
+        total_tokens: 7,
+      },
+    });
     expect(getUsageStats().model_usage['glm-5.1']).toBe(1);
-    expect(getUsageStats().credential_usage['cred-a']).toBe(1);
+    expect(getUsageStats().credential_usage['cred-a']).toBeUndefined();
+  });
+
+  it('persists usage history under config/usage and preserves historical filters', () => {
+    const now = new Date('2026-07-11T12:30:00.000Z');
+
+    recordUsageEvent({
+      accessKeyId: 'key-1',
+      accessKeyName: 'Team Key',
+      credentialFilename: 'legacy-credential.json',
+      model: 'glm-5.1',
+      route: '/v1/chat/completions',
+      timestamp: '2026-07-11T11:45:00.000Z',
+      usage: {
+        cache_creation_input_tokens: 3,
+        cache_read_input_tokens: 2,
+        input_tokens: 10,
+        output_tokens: 5,
+      },
+    });
+
+    recordUsageEvent({
+      accessKeyId: 'key-2',
+      accessKeyName: 'Other Key',
+      credentialFilename: 'legacy-credential.json',
+      model: 'glm-4.7',
+      route: '/v1/responses',
+      timestamp: '2026-07-10T12:15:00.000Z',
+      usage: {
+        total_tokens: 8,
+      },
+    });
+
+    const usagePath = path.join(tempConfigDir, 'usage', 'history.json');
+    expect(fs.existsSync(usagePath)).toBe(true);
+    expect(fs.existsSync(`${usagePath}.tmp`)).toBe(false);
+
+    const persisted = JSON.parse(fs.readFileSync(usagePath, 'utf8')) as {
+      events: Array<Record<string, unknown>>;
+    };
+    expect(persisted.events).toHaveLength(2);
+
+    const analytics = getUsageAnalytics({
+      now,
+      range: '24h',
+    });
+    expect(analytics.tableRows).toHaveLength(1);
+    expect(analytics.tableRows[0]).toMatchObject({
+      callCount: 1,
+      cacheHitTokens: 2,
+      model: 'glm-5.1',
+      totalTokens: 20,
+    });
+    expect(analytics.tokenSeries[0]?.points).toHaveLength(24);
+    expect(
+      analytics.filters.accessKeys.some((item) => item.value === 'key-1'),
+    ).toBe(true);
+    expect(
+      analytics.filters.credentials.some(
+        (item) => item.value === 'legacy-credential.json',
+      ),
+    ).toBe(true);
+
+    const filtered = getUsageAnalytics({
+      accessKey: 'key-2',
+      credential: 'legacy-credential.json',
+      now,
+      range: '3d',
+    });
+    expect(filtered.tableRows).toEqual([
+      {
+        callCount: 1,
+        cacheHitTokens: 0,
+        model: 'glm-4.7',
+        totalTokens: 8,
+      },
+    ]);
+    expect(filtered.todaySummary.callCount).toBe(0);
+  });
+
+  it('sanitizes invalid persisted usage records and clears usage history', () => {
+    const usageDir = path.join(tempConfigDir, 'usage');
+    fs.mkdirSync(usageDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(usageDir, 'history.json'),
+      JSON.stringify({
+        events: [
+          {
+            accessKeyId: 'key-1',
+            accessKeyName: 'Team Key',
+            cacheCreationTokens: '4',
+            cacheReadTokens: -1,
+            callCount: 0,
+            credentialFilename: 'cred.json',
+            inputTokens: '7',
+            model: ' glm-5.1 ',
+            outputTokens: 3,
+            route: '/v1/chat/completions',
+            timestamp: '2026-07-11T11:00:00.000Z',
+            totalTokens: '15',
+          },
+          {
+            model: 'broken',
+            route: '/v1/chat/completions',
+          },
+        ],
+      }),
+    );
+
+    const analytics = getUsageAnalytics({
+      now: new Date('2026-07-11T12:30:00.000Z'),
+      range: 'today',
+    });
+    expect(analytics.tableRows).toEqual([
+      {
+        callCount: 1,
+        cacheHitTokens: 0,
+        model: 'glm-5.1',
+        totalTokens: 15,
+      },
+    ]);
+    expect(analytics.tokenSeries[0]?.points).toHaveLength(
+      new Date('2026-07-11T12:30:00.000Z').getHours() + 1,
+    );
+
+    clearUsageHistory();
+    expect(
+      JSON.parse(fs.readFileSync(path.join(usageDir, 'history.json'), 'utf8')),
+    ).toEqual({
+      events: [],
+    });
+  });
+
+  it('persists debug settings and captures request and response snapshots', async () => {
+    expect(getDebugSettings()).toEqual({
+      autoRefreshSeconds: 0,
+      enabled: false,
+      maxEntries: 100,
+    });
+
+    fs.mkdirSync(tempConfigDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(tempConfigDir, 'debug-config.json'),
+      JSON.stringify({
+        autoRefreshSeconds: 7,
+        enabled: 'yes',
+        maxEntries: -1,
+      }),
+    );
+    expect(getDebugSettings()).toEqual({
+      autoRefreshSeconds: 0,
+      enabled: false,
+      maxEntries: 100,
+    });
+
+    expect(
+      updateDebugSettings({
+        autoRefreshSeconds: 15,
+        enabled: true,
+        maxEntries: 2000,
+      }),
+    ).toEqual({
+      autoRefreshSeconds: 15,
+      enabled: true,
+      maxEntries: 1000,
+    });
+    expect(isDebugEnabled()).toBe(true);
+
+    fs.writeFileSync(
+      path.join(tempConfigDir, 'debug-logs.json'),
+      JSON.stringify([
+        null,
+        {
+          createdAt: '2026-07-11T10:00:00.000Z',
+          id: 'valid-log',
+          route: '/v1/responses',
+        },
+        {
+          id: 'invalid-log',
+        },
+      ]),
+    );
+    expect(listDebugLogs()).toHaveLength(1);
+    clearDebugLogs();
+    expect(listDebugLogs()).toEqual([]);
+
+    setDebugTraceError(undefined, new Error('ignored'));
+    setDebugUpstreamRequest(undefined, {
+      body: null,
+      headers: {},
+      method: 'POST',
+      url: 'https://example.com',
+    });
+    enqueueUpstreamResponseSnapshot(undefined, new Response());
+    finalizeDebugTrace(undefined, new Response());
+
+    const trace = createDebugTrace({
+      requestBody: {
+        model: 'gpt-5.5',
+      },
+      requestKey: 'credential.json',
+      route: '/v1/responses',
+    });
+    setDebugTraceError(trace, 'upstream warning');
+    setDebugUpstreamRequest(trace, {
+      body: {
+        input: 'hello',
+      },
+      headers: {
+        authorization: 'Bearer [redacted]',
+      },
+      method: 'POST',
+      url: 'https://example.com/v1/responses',
+    });
+    enqueueUpstreamResponseSnapshot(
+      trace,
+      makeJsonResponse({
+        id: 'resp_upstream',
+      }),
+    );
+    finalizeDebugTrace(
+      trace,
+      new Response('completed', {
+        headers: {
+          'Content-Type': 'text/plain',
+        },
+        status: 202,
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(listDebugLogs()).toHaveLength(1);
+    });
+
+    expect(listDebugLogs()[0]).toMatchObject({
+      error: 'upstream warning',
+      requestBody: {
+        model: 'gpt-5.5',
+      },
+      requestKey: 'credential.json',
+      route: '/v1/responses',
+      transformedResponse: {
+        body: 'completed',
+        status: 202,
+      },
+      upstreamRequest: {
+        method: 'POST',
+        url: 'https://example.com/v1/responses',
+      },
+      upstreamResponse: {
+        body: {
+          id: 'resp_upstream',
+        },
+        status: 200,
+      },
+    });
   });
 
   it('covers access key store edge cases and mutation failures', () => {
@@ -543,6 +819,130 @@ describe('server units', () => {
     expect(deleteAccessKey(created.access_key.id)).toBe(true);
     expect(findAccessKeyById(created.access_key.id)).toBeNull();
     expect(getAccessKeySecret(created.access_key.id)).toBeNull();
+  });
+
+  it('removes deleted credential references from access keys', () => {
+    const firstCredential = addCredential({
+      bearer_token: 'token-first',
+      user_id: 'first@example.com',
+    });
+    const secondCredential = addCredential({
+      bearer_token: 'token-second',
+      user_id: 'second@example.com',
+    });
+    const singleCredential = addCredential({
+      bearer_token: 'token-third',
+      user_id: 'third@example.com',
+    });
+
+    const multiKey = createAccessKey({
+      credentialFilenames: [
+        firstCredential.filename,
+        secondCredential.filename,
+      ],
+      name: 'Multi Key',
+    });
+    const singleKey = createAccessKey({
+      credentialFilenames: [singleCredential.filename],
+      name: 'Single Key',
+    });
+
+    const listed = listCredentials();
+    const secondIndex = listed.credentials.findIndex(
+      (credential) => credential.filename === secondCredential.filename,
+    );
+    expect(deleteCredentialByIndex(secondIndex).success).toBe(true);
+    expect(
+      findAccessKeyById(multiKey.access_key.id)?.credentialFilenames,
+    ).toEqual([firstCredential.filename]);
+
+    const refreshedCredentials = listCredentials();
+    const refreshedSingleIndex = refreshedCredentials.credentials.findIndex(
+      (credential) => credential.filename === singleCredential.filename,
+    );
+    expect(deleteCredentialByIndex(refreshedSingleIndex).success).toBe(true);
+    expect(findAccessKeyById(singleKey.access_key.id)).toBeNull();
+  });
+
+  it('prunes stale credential references when reading access keys', () => {
+    const firstCredential = addCredential({
+      bearer_token: 'token-first',
+      user_id: 'first@example.com',
+    });
+
+    fs.mkdirSync(tempConfigDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(tempConfigDir, 'access-keys.json'),
+      JSON.stringify({
+        accessKeys: [
+          {
+            id: 'stale-and-valid',
+            name: 'Stale and Valid',
+            secret: 'cb2_validsecret',
+            createdAt: '2026-07-10T00:00:00.000Z',
+            updatedAt: '2026-07-10T00:00:00.000Z',
+            credentialFilenames: ['missing.json', firstCredential.filename],
+          },
+          {
+            id: 'stale-only',
+            name: 'Stale Only',
+            secret: 'cb2_stalesecret',
+            createdAt: '2026-07-10T00:00:00.000Z',
+            updatedAt: '2026-07-10T00:00:00.000Z',
+            credentialFilenames: ['missing.json'],
+          },
+        ],
+      }),
+    );
+
+    expect(listStoredAccessKeys()).toEqual([
+      expect.objectContaining({
+        credentialFilenames: [firstCredential.filename],
+        id: 'stale-and-valid',
+      }),
+    ]);
+
+    const persisted = JSON.parse(
+      fs.readFileSync(path.join(tempConfigDir, 'access-keys.json'), 'utf8'),
+    ) as { accessKeys: Array<{ credentialFilenames: string[]; id: string }> };
+    expect(persisted.accessKeys).toEqual([
+      {
+        createdAt: '2026-07-10T00:00:00.000Z',
+        credentialFilenames: [firstCredential.filename],
+        id: 'stale-and-valid',
+        name: 'Stale and Valid',
+        secret: 'cb2_validsecret',
+        updatedAt: '2026-07-10T00:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('supports direct credential reference cleanup helper', () => {
+    const firstCredential = addCredential({
+      bearer_token: 'token-first',
+      user_id: 'first@example.com',
+    });
+    const secondCredential = addCredential({
+      bearer_token: 'token-second',
+      user_id: 'second@example.com',
+    });
+    const created = createAccessKey({
+      credentialFilenames: [
+        firstCredential.filename,
+        secondCredential.filename,
+      ],
+      name: 'Direct Cleanup Key',
+    });
+
+    expect(
+      removeCredentialReferencesFromAccessKeys(secondCredential.filename),
+    ).toBe(true);
+    expect(
+      findAccessKeyById(created.access_key.id)?.credentialFilenames,
+    ).toEqual([firstCredential.filename]);
+    expect(removeCredentialReferencesFromAccessKeys('missing.json')).toBe(
+      false,
+    );
   });
 
   it('covers chat proxy error, token auth, and streaming branches', async () => {
@@ -1382,6 +1782,65 @@ describe('server units', () => {
       role: 'assistant',
       content: '',
     });
+  });
+
+  it('records responses passthrough usage from json and sse responses', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          response: {
+            usage: {
+              input_tokens: 4,
+              output_tokens: 2,
+              total_tokens: 6,
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          [
+            'event: response.created',
+            'data: {"type":"response.created","response":{"id":"resp_1"}}',
+            '',
+            'event: response.completed',
+            'data: {"type":"response.completed","response":{"usage":{"input_tokens":5,"output_tokens":3,"total_tokens":8}}}',
+            '',
+          ].join('\n'),
+          {
+            headers: {
+              'Content-Type': 'text/event-stream; charset=utf-8',
+            },
+          },
+        ),
+      );
+
+    const request = makeNextRequest('http://localhost/v1/responses', {
+      method: 'POST',
+    });
+    const jsonResponse = await proxyResponsesUpstream(request, {
+      input: 'hello',
+      model: 'gpt-5.5',
+    });
+    await jsonResponse.text();
+
+    const streamResponse = await proxyResponsesUpstream(request, {
+      input: 'hello again',
+      model: 'gpt-5.5',
+      stream: true,
+    });
+    await streamResponse.text();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(getUsageAnalytics({ range: 'today' }).tableRows).toEqual([
+      {
+        callCount: 2,
+        cacheHitTokens: 0,
+        model: 'gpt-5.5',
+        totalTokens: 14,
+      },
+    ]);
   });
 
   it('keeps empty streamed assistant content for previous_response_id follow-ups', async () => {

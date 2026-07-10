@@ -1,7 +1,7 @@
 import { atom } from 'jotai';
 
 export type TabKey =
-  'dashboard' | 'credentials' | 'api-test' | 'debug' | 'settings';
+  'dashboard' | 'usage' | 'credentials' | 'api-test' | 'debug' | 'settings';
 
 export type NotificationType = 'success' | 'error' | 'warning' | 'info';
 
@@ -160,6 +160,69 @@ export interface DebugState {
   saving: boolean;
 }
 
+export type UsageRange =
+  '1h' | '3h' | '6h' | '12h' | '24h' | '3d' | '7d' | 'today' | 'yesterday';
+
+export interface UsageBucketPoint {
+  callCount: number;
+  cacheHitTokens: number;
+  label: string;
+  start: string;
+  totalTokens: number;
+}
+
+export interface UsageChartSeries {
+  model: string;
+  points: UsageBucketPoint[];
+}
+
+export interface UsageTableRow {
+  callCount: number;
+  cacheHitTokens: number;
+  model: string;
+  totalTokens: number;
+}
+
+export interface UsageFilterOption {
+  label: string;
+  value: string;
+}
+
+export interface UsageFiltersState {
+  accessKey: string;
+  credential: string;
+  range: UsageRange;
+}
+
+export interface UsageState {
+  autoRefreshSeconds: number;
+  autoRefreshVisible: boolean;
+  callSeries: UsageChartSeries[];
+  filters: {
+    accessKeys: UsageFilterOption[];
+    credentials: UsageFilterOption[];
+  };
+  hoveredPoint: {
+    chart: 'calls' | 'tokens';
+    label: string;
+    metricLabel: string;
+    model: string;
+    value: number;
+    x: number;
+    y: number;
+  } | null;
+  lastUpdatedAt: string;
+  loading: boolean;
+  request: UsageFiltersState;
+  tableRows: UsageTableRow[];
+  todaySummary: {
+    cacheHitTokens: number;
+    callCount: number;
+    totalTokens: number;
+  };
+  tokenSeries: UsageChartSeries[];
+}
+
 export type SettingsValue = string | number | null;
 
 export interface SettingsState {
@@ -171,6 +234,7 @@ export interface SettingsState {
 
 export const TAB_ITEMS: Array<{ key: TabKey; label: string; icon: string }> = [
   { key: 'dashboard', label: '仪表板', icon: 'fas fa-tachometer-alt' },
+  { key: 'usage', label: 'Usage', icon: 'fas fa-wave-square' },
   { key: 'credentials', label: '凭证管理', icon: 'fas fa-key' },
   { key: 'api-test', label: 'API 测试', icon: 'fas fa-flask' },
   { key: 'debug', label: 'Debug', icon: 'fas fa-bug' },
@@ -296,6 +360,33 @@ export const defaultDebugState: DebugState = {
 };
 
 export const debugStateAtom = atom<DebugState>(defaultDebugState);
+
+export const defaultUsageState: UsageState = {
+  autoRefreshSeconds: 15,
+  autoRefreshVisible: true,
+  callSeries: [],
+  filters: {
+    accessKeys: [],
+    credentials: [],
+  },
+  hoveredPoint: null,
+  lastUpdatedAt: '',
+  loading: true,
+  request: {
+    accessKey: 'all',
+    credential: 'all',
+    range: '24h',
+  },
+  tableRows: [],
+  todaySummary: {
+    cacheHitTokens: 0,
+    callCount: 0,
+    totalTokens: 0,
+  },
+  tokenSeries: [],
+};
+
+export const usageStateAtom = atom<UsageState>(defaultUsageState);
 
 export const defaultSettingsState: SettingsState = {
   labels: {},
