@@ -5,6 +5,7 @@ const repoRoot = process.cwd();
 const tempRootDir = path.join(repoRoot, '.tmp-test-storage-backends');
 const tempDataDir = path.join(tempRootDir, '.codebuddy_data');
 const tempCredsDir = path.join(tempRootDir, '.codebuddy_creds');
+const tempLegacyConfigDir = path.join(tempRootDir, 'config');
 
 const cleanupTempState = (): void => {
   fs.rmSync(tempRootDir, { force: true, recursive: true, maxRetries: 5 });
@@ -67,13 +68,18 @@ describe('storage backends', () => {
     });
   });
 
-  it('migrates legacy access keys into the default file storage directory', async () => {
+  it('migrates legacy config documents into the default file storage directory', async () => {
     const legacyConfigDir = path.join(tempRootDir, 'config');
+    const legacyRuntimeConfig = { CODEBUDDY_AUTH_MODE: 'token' };
     const accessKeyStore = {
       accessKeys: [{ id: 'access-key-1', secret: 'secret' }],
     };
 
     fs.mkdirSync(legacyConfigDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(legacyConfigDir, 'config.json'),
+      JSON.stringify(legacyRuntimeConfig),
+    );
     fs.writeFileSync(
       path.join(legacyConfigDir, 'access-keys.json'),
       JSON.stringify(accessKeyStore),
@@ -84,11 +90,19 @@ describe('storage backends', () => {
     await expect(
       storage.readStorageJson('access-keys', 'store'),
     ).resolves.toEqual(accessKeyStore);
+    await expect(storage.readStorageJson('config', 'runtime')).resolves.toEqual(
+      legacyRuntimeConfig,
+    );
     expect(
       JSON.parse(
         fs.readFileSync(path.join(tempDataDir, 'access-keys.json'), 'utf8'),
       ),
     ).toEqual(accessKeyStore);
+    expect(
+      JSON.parse(
+        fs.readFileSync(path.join(tempDataDir, 'runtime.json'), 'utf8'),
+      ),
+    ).toEqual(legacyRuntimeConfig);
   });
 
   it('imports legacy files into the database backend and encrypts sensitive documents', async () => {
@@ -96,30 +110,29 @@ describe('storage backends', () => {
     process.env.CODEBUDDY_STORAGE_PG_URL = 'postgres://example.test/codebuddy';
     process.env.CODEBUDDY_STORAGE_ENCRYPTION_KEY = 'storage-secret';
 
-    fs.mkdirSync(tempDataDir, { recursive: true });
+    fs.mkdirSync(tempLegacyConfigDir, { recursive: true });
+    fs.mkdirSync(path.join(tempLegacyConfigDir, 'usage'), {
+      recursive: true,
+    });
     fs.mkdirSync(tempCredsDir, { recursive: true });
     fs.writeFileSync(
-      path.join(tempDataDir, 'runtime.json'),
+      path.join(tempLegacyConfigDir, 'config.json'),
       JSON.stringify({ CODEBUDDY_AUTH_MODE: 'token' }),
     );
     fs.writeFileSync(
-      path.join(tempDataDir, 'access-keys.json'),
+      path.join(tempLegacyConfigDir, 'access-keys.json'),
       JSON.stringify({ keys: [{ id: 'access-key-1' }] }),
     );
     fs.writeFileSync(
-      path.join(tempDataDir, 'debug-settings.json'),
+      path.join(tempLegacyConfigDir, 'debug-config.json'),
       JSON.stringify({ enabled: true }),
     );
     fs.writeFileSync(
-      path.join(tempDataDir, 'debug-logs.json'),
+      path.join(tempLegacyConfigDir, 'debug-logs.json'),
       JSON.stringify([{ level: 'error' }]),
     );
     fs.writeFileSync(
-      path.join(tempDataDir, 'admin-auth.json'),
-      JSON.stringify({ password: { hash: 'hash', salt: 'salt' } }),
-    );
-    fs.writeFileSync(
-      path.join(tempDataDir, 'usage-history.json'),
+      path.join(tempLegacyConfigDir, 'usage/history.json'),
       JSON.stringify([{ id: 'usage-1' }]),
     );
     fs.writeFileSync(

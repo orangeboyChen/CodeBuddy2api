@@ -240,14 +240,33 @@ const getLegacyDocumentPath = (
   namespace: string,
   key: string,
 ): string | null => {
-  if (namespace !== 'access-keys' || key !== 'store') {
+  const legacyConfigPath = process.env[LEGACY_CONFIG_PATH_ENV]?.trim();
+  const legacyConfigDir = legacyConfigPath
+    ? path.dirname(
+        path.resolve(
+          /* turbopackIgnore: true */ process.cwd(),
+          legacyConfigPath,
+        ),
+      )
+    : path.resolve(/* turbopackIgnore: true */ process.cwd(), 'config');
+  const legacyFilename =
+    namespace === 'config' && key === 'runtime'
+      ? 'config.json'
+      : namespace === 'access-keys' && key === 'store'
+        ? 'access-keys.json'
+        : namespace === 'debug' && key === 'settings'
+          ? 'debug-config.json'
+          : namespace === 'debug' && key === 'logs'
+            ? 'debug-logs.json'
+            : namespace === 'usage' && key === 'history'
+              ? 'usage/history.json'
+              : null;
+
+  if (!legacyFilename) {
     return null;
   }
 
-  const legacyPath = path.resolve(
-    /* turbopackIgnore: true */ process.cwd(),
-    'config/access-keys.json',
-  );
+  const legacyPath = path.join(legacyConfigDir, legacyFilename);
 
   return legacyPath === getDocumentPath(namespace, key) ? null : legacyPath;
 };
@@ -255,6 +274,7 @@ const getLegacyDocumentPath = (
 const readFileStorageDocument = <T>(
   namespace: string,
   key: string,
+  migrateLegacy = true,
 ): StorageJsonReadResult<T> => {
   const documentPath = getDocumentPath(namespace, key);
   const current = readJsonFileDetailed<T>(documentPath);
@@ -275,7 +295,10 @@ const readFileStorageDocument = <T>(
     return legacy.exists ? legacy : current;
   }
 
-  writeJsonFile(documentPath, legacy.value);
+  if (migrateLegacy) {
+    writeJsonFile(documentPath, legacy.value);
+  }
+
   return legacy;
 };
 
@@ -520,9 +543,11 @@ class DatabaseStorageBackend implements StorageBackend {
     ];
 
     for (const document of singletons) {
-      const value = readJsonFile<unknown>(
-        getDocumentPath(document.namespace, document.key),
-      );
+      const value = readFileStorageDocument<unknown>(
+        document.namespace,
+        document.key,
+        false,
+      ).value;
 
       if (value !== null) {
         await this.importLegacyDocument(

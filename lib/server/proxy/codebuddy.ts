@@ -505,10 +505,6 @@ const buildUpstreamHeaders = async (
     headers.set('X-Tenant-Id', String(tenantId));
   }
 
-  Object.entries(incoming).forEach(([key, value]) => {
-    headers.set(key, value);
-  });
-
   return headers;
 };
 

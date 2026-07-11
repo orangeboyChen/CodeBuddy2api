@@ -25,7 +25,10 @@ import {
   resetStorageRuntime as resetStorageLayer,
   writeStorageJson,
 } from '@/lib/server/storage';
-import { pollCodeBuddyAuth } from '@/lib/server/proxy/codebuddy-auth';
+import {
+  pollCodeBuddyAuth,
+  startCodeBuddyAuth,
+} from '@/lib/server/proxy/codebuddy-auth';
 
 const repoRoot = process.cwd();
 const tempRootDir = path.join(repoRoot, '.tmp-test-admin-auth-storage');
@@ -157,19 +160,23 @@ describe('admin auth and storage', () => {
     expect(getCookieHeader(logoutResponse)).toContain('Max-Age=0');
   });
 
-  it('requires an admin session before polling OAuth credentials', async () => {
+  it('requires an admin session before starting or polling OAuth credentials', async () => {
     await setupAdminPassword(
       makeRequest('/admin-api/auth/setup'),
       'correct horse battery staple',
     );
     const fetchMock = vi.spyOn(globalThis, 'fetch');
 
-    const response = await pollCodeBuddyAuth(
+    const startResponse = await startCodeBuddyAuth(
+      makeRequest('/codebuddy/auth/start'),
+    );
+    const pollResponse = await pollCodeBuddyAuth(
       'state-1',
       makeRequest('/codebuddy/auth/poll'),
     );
 
-    expect(response.status).toBe(401);
+    expect(startResponse.status).toBe(401);
+    expect(pollResponse.status).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

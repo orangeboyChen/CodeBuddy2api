@@ -80,7 +80,15 @@ const getMetadataValue = (
   return undefined;
 };
 
-export const startCodeBuddyAuth = async (): Promise<Response> => {
+export const startCodeBuddyAuth = async (
+  request: Request = new Request('http://localhost/codebuddy/auth/start'),
+): Promise<Response> => {
+  const authError = await getAdminSessionErrorResponse(request);
+
+  if (authError) {
+    return authError;
+  }
+
   try {
     const nonce = crypto.randomUUID().replaceAll('-', '');
     const authStateEndpoint = await getAuthStateEndpoint();

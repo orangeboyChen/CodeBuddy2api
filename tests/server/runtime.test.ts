@@ -25,6 +25,7 @@ import * as V1ChatRoute from '@/app/v1/chat/completions/route';
 import * as V1ModelsRoute from '@/app/v1/models/route';
 import * as V1ResponsesRoute from '@/app/v1/responses/route';
 import { resetCredentialRuntimeState } from '@/lib/server/domain/credentials';
+import { listDebugLogs, updateDebugSettings } from '@/lib/server/domain/debug';
 import { resetResponseSessions } from '@/lib/server/proxy/responses';
 import { resetUsageStats } from '@/lib/server/domain/stats';
 import { recordUsageEvent } from '@/lib/server/domain/usage';
@@ -366,9 +367,46 @@ describe('server runtime', () => {
     expect(v1Response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(
+      new Headers((fetchMock.mock.calls[1]?.[1] as RequestInit).headers).get(
+        'authorization',
+      ),
+    ).toBe('Bearer chat-token');
+    expect(
       JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))
         .stream,
     ).toBe(true);
+  });
+
+  it('does not persist rejected client requests in debug logs', async () => {
+    const credentialPayload = await (
+      await AdminCredentialsRoute.POST(
+        makeJsonRequest('http://localhost/admin-api/credentials', {
+          bearer_token: 'debug-token',
+          user_id: 'debug@example.com',
+        }),
+      )
+    ).json();
+    await AdminAccessKeysRoute.POST(
+      makeJsonRequest('http://localhost/admin-api/access-keys', {
+        credential_filenames: [credentialPayload.filename],
+        name: 'Debug Key',
+      }),
+    );
+    await updateDebugSettings({ enabled: true });
+
+    const response = await V1ChatRoute.POST(
+      makeNextRequest('http://localhost/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ content: 'untrusted request', role: 'user' }],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(await listDebugLogs()).toEqual([]);
   });
 
   it('falls back to the default model when clients send a blank model', async () => {
@@ -705,7 +743,9 @@ describe('server runtime', () => {
         }),
       );
 
-    const startPayload = await (await StartRoute.GET()).json();
+    const startPayload = await (
+      await StartRoute.GET(new Request('http://localhost/codebuddy/auth/start'))
+    ).json();
     expect(startPayload.auth_state).toBe('auth-state-1');
 
     const pendingPoll = await (

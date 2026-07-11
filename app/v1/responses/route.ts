@@ -13,6 +13,12 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export const POST = async (request: NextRequest): Promise<Response> => {
+  const authError = await getClientAuthErrorResponse(request);
+
+  if (authError) {
+    return authError;
+  }
+
   const body = await getJsonBody<Record<string, unknown>>(request);
   const debugTrace = (await isDebugEnabled())
     ? createDebugTrace({
@@ -23,12 +29,6 @@ export const POST = async (request: NextRequest): Promise<Response> => {
         route: '/v1/responses',
       })
     : undefined;
-  const authError = await getClientAuthErrorResponse(request);
-
-  if (authError) {
-    finalizeDebugTrace(debugTrace, authError);
-    return authError;
-  }
 
   const response = await handleResponsesRequest(request, body, debugTrace);
   finalizeDebugTrace(debugTrace, response);
