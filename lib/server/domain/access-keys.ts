@@ -1,10 +1,6 @@
 import crypto from 'node:crypto';
 
-import {
-  listStorageJson,
-  readStorageJsonResult,
-  writeStorageJson,
-} from '../storage';
+import { readStorageJsonResult, writeStorageJson } from '../storage';
 
 export interface AccessKeyRecord {
   createdAt: string;
@@ -32,57 +28,6 @@ type AccessKeyStoreState =
   | { kind: 'ok'; store: AccessKeyStore }
   | { kind: 'missing'; store: AccessKeyStore }
   | { kind: 'error'; error: string; store: AccessKeyStore };
-
-const listAvailableCredentialFilenames = async (): Promise<string[]> => {
-  const items = await listStorageJson<Record<string, unknown>>('credentials');
-
-  return items
-    .filter(
-      ({ key, value }) =>
-        key !== 'manager_state.json' &&
-        Boolean(value.bearer_token ?? value.access_token),
-    )
-    .map(({ key }) => key)
-    .sort((left, right) => left.localeCompare(right));
-};
-
-const pruneAccessKeyStore = (
-  store: AccessKeyStore,
-  availableCredentialFilenames: string[],
-): { changed: boolean; store: AccessKeyStore } => {
-  const available = new Set(availableCredentialFilenames);
-  let changed = false;
-
-  const accessKeys = store.accessKeys.flatMap((record) => {
-    const credentialFilenames = normalizeCredentialFilenames(
-      record.credentialFilenames,
-    ).filter((filename) => available.has(filename));
-
-    if (credentialFilenames.length !== record.credentialFilenames.length) {
-      changed = true;
-    }
-
-    if (!credentialFilenames.length) {
-      changed = true;
-      return [];
-    }
-
-    if (
-      credentialFilenames.some(
-        (filename, index) => filename !== record.credentialFilenames[index],
-      )
-    ) {
-      changed = true;
-    }
-
-    return [{ ...record, credentialFilenames }];
-  });
-
-  return {
-    changed,
-    store: { accessKeys },
-  };
-};
 
 const readAccessKeyStoreState = async (): Promise<AccessKeyStoreState> => {
   const parsedResult = await readStorageJsonResult<Partial<AccessKeyStore>>(
@@ -123,18 +68,9 @@ const readAccessKeyStoreState = async (): Promise<AccessKeyStoreState> => {
         })
       : [];
 
-    const normalizedStore = pruneAccessKeyStore(
-      { accessKeys },
-      await listAvailableCredentialFilenames(),
-    );
-
-    if (normalizedStore.changed) {
-      await writeAccessKeyStore(normalizedStore.store);
-    }
-
     return {
       kind: 'ok',
-      store: normalizedStore.store,
+      store: { accessKeys },
     };
   } catch (error) {
     return {
@@ -329,17 +265,10 @@ export const removeCredentialReferencesFromAccessKeys = async (
 ): Promise<boolean> => {
   const store = await readAccessKeyStore();
   let changed = false;
-  const available = new Set(
-    (await listAvailableCredentialFilenames()).filter(
-      (filename) => filename !== credentialFilename,
-    ),
-  );
   const accessKeys = store.accessKeys.flatMap((record) => {
     const credentialFilenames = normalizeCredentialFilenames(
       record.credentialFilenames,
-    ).filter(
-      (filename) => filename !== credentialFilename && available.has(filename),
-    );
+    ).filter((filename) => filename !== credentialFilename);
 
     if (credentialFilenames.length !== record.credentialFilenames.length) {
       changed = true;

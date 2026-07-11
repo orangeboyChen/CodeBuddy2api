@@ -781,12 +781,17 @@ describe('server units', () => {
       }),
     );
 
-    expect(await hasAccessKeys()).toBe(false);
-    expect(await findAccessKeyById('valid-id')).toBeNull();
-    expect(await findAccessKeyBySecret('shortsecret')).toBeNull();
-    expect(await getAccessKeySecret('valid-id')).toBeNull();
-    expect(await listStoredAccessKeys()).toEqual([]);
-    expect((await listAccessKeys()).access_keys).toEqual([]);
+    expect(await hasAccessKeys()).toBe(true);
+    expect((await findAccessKeyById('valid-id'))?.credentialFilenames).toEqual([
+      'cred-b.json',
+      'cred-a.json',
+    ]);
+    expect((await findAccessKeyBySecret('shortsecret'))?.id).toBe('valid-id');
+    expect(await getAccessKeySecret('valid-id')).toMatchObject({
+      secret: 'shortsecret',
+    });
+    expect(await listStoredAccessKeys()).toHaveLength(1);
+    expect((await listAccessKeys()).access_keys).toHaveLength(1);
 
     fs.writeFileSync(path.join(tempDataDir, 'access-keys.json'), '{');
     expect(await listStoredAccessKeys()).toEqual([]);
@@ -928,7 +933,7 @@ describe('server units', () => {
     expect(await findAccessKeyById(singleKey.access_key.id)).toBeNull();
   });
 
-  it('prunes stale credential references when reading access keys', async () => {
+  it('preserves access keys when a referenced credential is unavailable', async () => {
     const firstCredential = await addCredential({
       bearer_token: 'token-first',
       user_id: 'first@example.com',
@@ -961,24 +966,23 @@ describe('server units', () => {
 
     expect(await listStoredAccessKeys()).toEqual([
       expect.objectContaining({
-        credentialFilenames: [firstCredential.filename],
+        credentialFilenames: ['missing.json', firstCredential.filename],
         id: 'stale-and-valid',
       }),
+      expect.objectContaining({
+        credentialFilenames: ['missing.json'],
+        id: 'stale-only',
+      }),
     ]);
+    expect(await hasAccessKeys()).toBe(true);
+    expect((await findAccessKeyBySecret('cb2_stalesecret'))?.id).toBe(
+      'stale-only',
+    );
 
     const persisted = JSON.parse(
       fs.readFileSync(path.join(tempDataDir, 'access-keys.json'), 'utf8'),
     ) as { accessKeys: Array<{ credentialFilenames: string[]; id: string }> };
-    expect(persisted.accessKeys).toEqual([
-      {
-        createdAt: '2026-07-10T00:00:00.000Z',
-        credentialFilenames: [firstCredential.filename],
-        id: 'stale-and-valid',
-        name: 'Stale and Valid',
-        secret: 'cb2_validsecret',
-        updatedAt: '2026-07-10T00:00:00.000Z',
-      },
-    ]);
+    expect(persisted.accessKeys).toHaveLength(2);
   });
 
   it('supports direct credential reference cleanup helper', async () => {

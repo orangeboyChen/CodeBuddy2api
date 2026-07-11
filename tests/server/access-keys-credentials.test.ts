@@ -4,6 +4,8 @@ import path from 'node:path';
 import {
   createAccessKey,
   findAccessKeyById,
+  findAccessKeyBySecret,
+  hasAccessKeys,
   listStoredAccessKeys,
   removeCredentialReferencesFromAccessKeys,
 } from '@/lib/server/domain/access-keys';
@@ -86,7 +88,7 @@ describe('access key credential reconciliation', () => {
     expect(await findAccessKeyById(singleKey.access_key.id)).toBeNull();
   });
 
-  it('prunes stale credential references when reading access keys', async () => {
+  it('preserves access keys when a referenced credential is unavailable', async () => {
     const firstCredential = await addCredential({
       bearer_token: 'token-first',
       user_id: 'first@example.com',
@@ -119,24 +121,23 @@ describe('access key credential reconciliation', () => {
 
     expect(await listStoredAccessKeys()).toEqual([
       expect.objectContaining({
-        credentialFilenames: [firstCredential.filename],
+        credentialFilenames: ['missing.json', firstCredential.filename],
         id: 'stale-and-valid',
       }),
+      expect.objectContaining({
+        credentialFilenames: ['missing.json'],
+        id: 'stale-only',
+      }),
     ]);
+    expect(await hasAccessKeys()).toBe(true);
+    expect(await findAccessKeyBySecret('cb2_stalesecret')).toMatchObject({
+      id: 'stale-only',
+    });
 
     const persisted = JSON.parse(
       fs.readFileSync(path.join(tempDataDir, 'access-keys.json'), 'utf8'),
     ) as { accessKeys: Array<{ credentialFilenames: string[]; id: string }> };
-    expect(persisted.accessKeys).toEqual([
-      {
-        createdAt: '2026-07-10T00:00:00.000Z',
-        credentialFilenames: [firstCredential.filename],
-        id: 'stale-and-valid',
-        name: 'Stale and Valid',
-        secret: 'cb2_validsecret',
-        updatedAt: '2026-07-10T00:00:00.000Z',
-      },
-    ]);
+    expect(persisted.accessKeys).toHaveLength(2);
   });
 
   it('supports direct credential reference cleanup helper', async () => {
