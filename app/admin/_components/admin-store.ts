@@ -1,6 +1,7 @@
 import { atom } from 'jotai';
 
-export type TabKey = 'dashboard' | 'credentials' | 'api-test' | 'settings';
+export type TabKey =
+  'dashboard' | 'usage' | 'credentials' | 'api-test' | 'debug' | 'settings';
 
 export type NotificationType = 'success' | 'error' | 'warning' | 'info';
 
@@ -26,6 +27,8 @@ export interface CredentialSummary {
   token_type: string;
   scope: string | null;
   domain: string;
+  responses_passthrough: boolean;
+  first_message_role_to_system: boolean;
   enterprise_id: string | number | null;
   tenant_id: string | number | null;
   has_refresh_token: boolean;
@@ -88,6 +91,9 @@ export interface AuthState {
 
 export interface CredentialFormState {
   bearerToken: string;
+  editingIndex: number | null;
+  firstMessageRoleToSystem: boolean;
+  responsesPassthrough: boolean;
   userId: string;
 }
 
@@ -112,11 +118,109 @@ export interface CredentialsState {
 }
 
 export interface ApiTestState {
+  credentialFilename: string;
   message: string;
   model: string;
   result: string;
   stream: boolean;
   submitting: boolean;
+}
+
+export interface DebugLogEntry {
+  createdAt: string;
+  error: string | null;
+  id: string;
+  requestBody: unknown;
+  requestKey: string | null;
+  route: string;
+  transformedResponse: {
+    body: unknown;
+    headers: Record<string, string>;
+    status: number;
+  } | null;
+  upstreamRequest: {
+    body: unknown;
+    headers: Record<string, string>;
+    method: string;
+    url: string;
+  } | null;
+  upstreamResponse: {
+    body: unknown;
+    headers: Record<string, string>;
+    status: number;
+  } | null;
+}
+
+export interface DebugState {
+  autoRefreshSeconds: number;
+  enabled: boolean;
+  items: DebugLogEntry[];
+  loading: boolean;
+  maxEntries: number;
+  saving: boolean;
+}
+
+export type UsageRange =
+  '1h' | '3h' | '6h' | '12h' | '24h' | '3d' | '7d' | 'today' | 'yesterday';
+
+export interface UsageBucketPoint {
+  callCount: number;
+  cacheHitTokens: number;
+  label: string;
+  start: string;
+  totalTokens: number;
+}
+
+export interface UsageChartSeries {
+  model: string;
+  points: UsageBucketPoint[];
+}
+
+export interface UsageTableRow {
+  callCount: number;
+  cacheHitTokens: number;
+  model: string;
+  totalTokens: number;
+}
+
+export interface UsageFilterOption {
+  label: string;
+  value: string;
+}
+
+export interface UsageFiltersState {
+  accessKey: string;
+  credential: string;
+  range: UsageRange;
+}
+
+export interface UsageState {
+  autoRefreshSeconds: number;
+  autoRefreshVisible: boolean;
+  callSeries: UsageChartSeries[];
+  filters: {
+    accessKeys: UsageFilterOption[];
+    credentials: UsageFilterOption[];
+  };
+  hoveredPoint: {
+    chart: 'calls' | 'tokens';
+    label: string;
+    metricLabel: string;
+    model: string;
+    value: number;
+    x: number;
+    y: number;
+  } | null;
+  lastUpdatedAt: string;
+  loading: boolean;
+  request: UsageFiltersState;
+  tableRows: UsageTableRow[];
+  todaySummary: {
+    cacheHitTokens: number;
+    callCount: number;
+    totalTokens: number;
+  };
+  tokenSeries: UsageChartSeries[];
 }
 
 export type SettingsValue = string | number | null;
@@ -130,8 +234,10 @@ export interface SettingsState {
 
 export const TAB_ITEMS: Array<{ key: TabKey; label: string; icon: string }> = [
   { key: 'dashboard', label: '仪表板', icon: 'fas fa-tachometer-alt' },
+  { key: 'usage', label: '用量统计', icon: 'fas fa-wave-square' },
   { key: 'credentials', label: '凭证管理', icon: 'fas fa-key' },
   { key: 'api-test', label: 'API 测试', icon: 'fas fa-flask' },
+  { key: 'debug', label: 'Debug', icon: 'fas fa-bug' },
   { key: 'settings', label: '设置', icon: 'fas fa-cog' },
 ];
 
@@ -219,6 +325,9 @@ export const defaultCredentialsState: CredentialsState = {
   currentLoading: true,
   form: {
     bearerToken: '',
+    editingIndex: null,
+    firstMessageRoleToSystem: false,
+    responsesPassthrough: false,
     userId: '',
   },
   items: [],
@@ -231,14 +340,53 @@ export const credentialsStateAtom = atom<CredentialsState>(
 );
 
 export const defaultApiTestState: ApiTestState = {
+  credentialFilename: '',
   message: 'Hello, what is 2+2?',
-  model: 'glm-5.1',
+  model: '',
   result: '点击"发送测试"查看API响应...',
   stream: false,
   submitting: false,
 };
 
 export const apiTestStateAtom = atom<ApiTestState>(defaultApiTestState);
+
+export const defaultDebugState: DebugState = {
+  autoRefreshSeconds: 0,
+  enabled: false,
+  items: [],
+  loading: true,
+  maxEntries: 100,
+  saving: false,
+};
+
+export const debugStateAtom = atom<DebugState>(defaultDebugState);
+
+export const defaultUsageState: UsageState = {
+  autoRefreshSeconds: 15,
+  autoRefreshVisible: true,
+  callSeries: [],
+  filters: {
+    accessKeys: [],
+    credentials: [],
+  },
+  hoveredPoint: null,
+  lastUpdatedAt: '',
+  loading: true,
+  request: {
+    accessKey: 'all',
+    credential: 'all',
+    range: '24h',
+  },
+  tableRows: [],
+  todaySummary: {
+    cacheHitTokens: 0,
+    callCount: 0,
+    totalTokens: 0,
+  },
+  tokenSeries: [],
+};
+
+export const usageStateAtom = atom<UsageState>(defaultUsageState);
 
 export const defaultSettingsState: SettingsState = {
   labels: {},

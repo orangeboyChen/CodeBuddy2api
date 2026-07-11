@@ -6,7 +6,6 @@ import {
   hasAccessKeys,
   type AccessKeyRecord,
 } from './access-keys';
-import { getLegacyServerPassword } from './config';
 
 const extractBearerToken = (request: NextRequest): string | null => {
   const header = request.headers.get('authorization')?.trim();
@@ -48,17 +47,6 @@ const getAccessKeyStoreErrorResponse = (): Response | null => {
   );
 };
 
-const getLegacyPasswordToken = (request: NextRequest): string | null => {
-  return extractBearerToken(request);
-};
-
-const matchesLegacyPassword = (request: NextRequest): boolean => {
-  const password = getLegacyServerPassword();
-  const token = getLegacyPasswordToken(request);
-
-  return Boolean(password && token && token === password);
-};
-
 export const resolveRequestAccessKey = (
   request: NextRequest,
 ): AccessKeyRecord | null => {
@@ -88,29 +76,7 @@ export const getClientAuthErrorResponse = (
     return storeError;
   }
 
-  const legacyPassword = getLegacyServerPassword();
-
   if (!hasAccessKeys()) {
-    if (!legacyPassword) {
-      return null;
-    }
-
-    const token = getLegacyPasswordToken(request);
-
-    if (!token) {
-      return Response.json(
-        { error: { message: 'Authorization header is required' } },
-        { status: 401 },
-      );
-    }
-
-    if (token !== legacyPassword) {
-      return Response.json(
-        { error: { message: 'Invalid password' } },
-        { status: 403 },
-      );
-    }
-
     return null;
   }
 
@@ -121,10 +87,6 @@ export const getClientAuthErrorResponse = (
       { error: { message: 'x-api-key or Authorization header is required' } },
       { status: 401 },
     );
-  }
-
-  if (matchesLegacyPassword(request)) {
-    return null;
   }
 
   if (!findAccessKeyBySecret(token)) {
@@ -146,29 +108,31 @@ export const getAdminAuthErrorResponse = (
     return storeError;
   }
 
-  const password = getLegacyServerPassword();
-
-  if (!password) {
+  if (!hasAccessKeys()) {
     return null;
   }
 
-  const token = getLegacyPasswordToken(request);
+  const token = extractAccessKeyToken(request);
 
   if (!token) {
     return Response.json(
-      { error: { message: 'Authorization header is required' } },
+      { error: { message: 'x-api-key or Authorization header is required' } },
       { status: 401 },
     );
   }
 
-  if (token !== password) {
+  if (!findAccessKeyBySecret(token)) {
     return Response.json(
-      { error: { message: 'Invalid password' } },
+      { error: { message: 'Invalid access key' } },
       { status: 403 },
     );
   }
 
   return null;
+};
+
+export const getAuthErrorResponse = (request: NextRequest): Response | null => {
+  return getClientAuthErrorResponse(request);
 };
 
 export const getAnthropicAuthErrorResponse = (
@@ -190,38 +154,7 @@ export const getAnthropicAuthErrorResponse = (
     );
   }
 
-  const legacyPassword = getLegacyServerPassword();
-
   if (!hasAccessKeys()) {
-    if (!legacyPassword) {
-      return null;
-    }
-
-    const token = getLegacyPasswordToken(request);
-
-    if (!token) {
-      return Response.json(
-        {
-          type: 'error',
-          error: {
-            type: 'authentication_error',
-            message: 'Authorization header is required',
-          },
-        },
-        { status: 401 },
-      );
-    }
-
-    if (token !== legacyPassword) {
-      return Response.json(
-        {
-          type: 'error',
-          error: { type: 'authentication_error', message: 'Invalid API key' },
-        },
-        { status: 403 },
-      );
-    }
-
     return null;
   }
 
@@ -238,10 +171,6 @@ export const getAnthropicAuthErrorResponse = (
       },
       { status: 401 },
     );
-  }
-
-  if (matchesLegacyPassword(request)) {
-    return null;
   }
 
   if (!findAccessKeyBySecret(token)) {

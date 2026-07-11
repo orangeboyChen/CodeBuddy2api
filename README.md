@@ -1,6 +1,6 @@
 # CodeBuddy2API
 
-Wrap CodeBuddy APIs with an OpenAI-compatible proxy so any standard OpenAI client can talk to CodeBuddy through a unified interface.
+Wrap CodeBuddy APIs with a proxy that supports both OpenAI-compatible and Anthropic-compatible request formats, so standard OpenAI and Claude clients can talk to CodeBuddy through one unified interface.
 
 > Forked from [Sliverkiss/CodeBuddy2api](https://github.com/Sliverkiss/CodeBuddy2api).
 
@@ -35,13 +35,19 @@ From here you can:
 
 ## Using the API
 
-The OpenAI-compatible API is available at `/v1`:
+The proxy supports both OpenAI-style and Anthropic-style inference requests:
 
 ```
 http://<your-host>:8001/v1
 ```
 
-Both **Chat Completions** (`POST /v1/chat/completions`) and **Responses** (`POST /v1/responses`) endpoints are supported, so you can use it directly with Codex, the OpenAI SDK, or any OpenAI-compatible client.
+Supported endpoints include:
+
+- **Chat Completions**: `POST /v1/chat/completions`
+- **Responses**: `POST /v1/responses`
+- **Anthropic Messages**: `POST /v1/messages`
+
+This means you can use the proxy directly with Codex, the OpenAI SDK, Claude Code, Anthropic SDK clients, or other OpenAI/Anthropic-compatible tooling.
 
 ### Codex
 
@@ -57,6 +63,7 @@ codex
 
 ```bash
 curl -X POST "http://127.0.0.1:8001/v1/chat/completions" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "glm-5.1",
@@ -68,6 +75,7 @@ curl -X POST "http://127.0.0.1:8001/v1/chat/completions" \
 
 ```bash
 curl -X POST "http://127.0.0.1:8001/v1/responses" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "glm-5.1",
@@ -121,19 +129,17 @@ console.log(response.choices[0]?.message?.content);
 ### Authentication
 
 - Client inference routes (`/v1/chat/completions`, `/v1/responses`, `/v1/messages`, `/v1/models`) accept managed access keys. Send them as `Authorization: Bearer <access-key>` or `x-api-key: <access-key>`.
-- During migration, if `CODEBUDDY_PASSWORD` is still set and no access keys have been created yet, the same client routes continue to accept `Authorization: Bearer <password>`.
-- Admin and global credential management routes only accept the legacy Bearer password when `CODEBUDDY_PASSWORD` is configured.
+- Global credential management routes under `/v1/credentials*` and `/api/settings` use the same managed access keys.
+- The built-in web admin console continues to use its existing `/admin-api/*` routes without introducing a password prompt.
 
 ## Configuration
 
 Settings resolve in this order: `config/config.json` > environment variables > built-in defaults.
 
-| Key                   | Default | Description                                                                |
-| --------------------- | ------- | -------------------------------------------------------------------------- |
-| `CODEBUDDY_PASSWORD`  | empty   | Optional legacy Bearer password for admin routes and access-key migration. |
-| `CODEBUDDY_AUTH_MODE` | `auto`  | `auto`, `api_key`, or `token`.                                             |
-| `CODEBUDDY_API_KEY`   | empty   | Required when `CODEBUDDY_AUTH_MODE=api_key`.                               |
-| `CODEBUDDY_LOG_LEVEL` | `INFO`  | Runtime log level.                                                         |
+| Key                   | Default | Description                                         |
+| --------------------- | ------- | --------------------------------------------------- |
+| `CODEBUDDY_AUTH_MODE` | `auto`  | `auto` or `token`, both based on saved credentials. |
+| `CODEBUDDY_LOG_LEVEL` | `INFO`  | Runtime log level.                                  |
 
 See `.env.example` and `config/config.example.json` for all options.
 

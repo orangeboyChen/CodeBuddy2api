@@ -6,17 +6,21 @@ import { useHydrateAtoms } from 'jotai/utils';
 
 import {
   createCredentialsState,
+  createDebugState,
   createDashboardState,
   createSettingsState,
+  createUsageState,
   type AdminConsoleInitialData,
 } from '@/app/admin/_components/admin-initial-state';
 import {
   ApiTestSection,
   CredentialsSection,
+  DebugSection,
   DashboardSection,
   NotificationBar,
   SettingsSection,
   TabNav,
+  UsageSection,
 } from '@/app/admin/_components/admin-sections';
 import {
   activeTabAtom,
@@ -25,14 +29,22 @@ import {
   type AccessKeySummary,
   type CredentialSummary,
   credentialsStateAtom,
+  debugStateAtom,
   dashboardStateAtom,
   defaultCredentialsState,
+  defaultDebugState,
   defaultDashboardState,
   defaultSettingsState,
+  defaultUsageState,
   notificationAtom,
   settingsStateAtom,
   themeAtom,
   type ThemeMode,
+  type UsageChartSeries,
+  type UsageFilterOption,
+  type UsageFiltersState,
+  type UsageRange,
+  usageStateAtom,
 } from '@/app/admin/_components/admin-store';
 
 interface HealthResponse {
@@ -68,6 +80,27 @@ interface StatsResponse {
   model_usage?: Record<string, number>;
 }
 
+interface UsageResponse {
+  callSeries?: UsageChartSeries[];
+  filters?: {
+    accessKeys?: UsageFilterOption[];
+    credentials?: UsageFilterOption[];
+  };
+  range?: UsageRange;
+  tableRows?: Array<{
+    callCount?: number;
+    cacheHitTokens?: number;
+    model?: string;
+    totalTokens?: number;
+  }>;
+  todaySummary?: {
+    cacheHitTokens?: number;
+    callCount?: number;
+    totalTokens?: number;
+  };
+  tokenSeries?: UsageChartSeries[];
+}
+
 interface StartAuthResponse {
   auth_state?: string;
   error?: string;
@@ -90,6 +123,27 @@ interface SettingsResponse {
   labels?: Record<string, string>;
   settings?: Record<string, string | number | null>;
 }
+
+interface DebugResponse {
+  autoRefreshSeconds?: number;
+  enabled?: boolean;
+  items?: Array<
+    typeof defaultDebugState.items extends Array<infer Item> ? Item : never
+  >;
+  maxEntries?: number;
+  message?: string;
+}
+
+const DEBUG_AUTO_REFRESH_OPTIONS = [
+  { label: '自动刷新：关闭', value: 0 },
+  { label: '自动刷新：5 秒', value: 5 },
+  { label: '自动刷新：10 秒', value: 10 },
+  { label: '自动刷新：15 秒', value: 15 },
+  { label: '自动刷新：30 秒', value: 30 },
+  { label: '自动刷新：1 分钟', value: 60 },
+  { label: '自动刷新：2 分钟', value: 120 },
+  { label: '自动刷新：5 分钟', value: 300 },
+] as const;
 
 interface ApiTestSuccess {
   choices?: Array<{
@@ -156,6 +210,13 @@ const buildApiEndpoint = () => {
   return `${window.location.origin}/v1`;
 };
 
+const getConfiguredModels = (rawValue: string | number | null | undefined) => {
+  return String(rawValue ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+
 const resolveSystemDark = () => {
   if (typeof window === 'undefined' || !window.matchMedia) {
     return false;
@@ -195,6 +256,12 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
   const initialCredentialsState = initialData
     ? createCredentialsState(initialData)
     : defaultCredentialsState;
+  const initialDebugState = initialData
+    ? createDebugState(initialData)
+    : defaultDebugState;
+  const initialUsageState = initialData
+    ? createUsageState(initialData)
+    : defaultUsageState;
   const initialSettingsState = initialData
     ? createSettingsState(initialData)
     : defaultSettingsState;
@@ -202,6 +269,8 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
   useHydrateAtoms([
     [dashboardStateAtom, initialDashboardState],
     [credentialsStateAtom, initialCredentialsState],
+    [debugStateAtom, initialDebugState],
+    [usageStateAtom, initialUsageState],
     [settingsStateAtom, initialSettingsState],
   ]);
 
@@ -210,25 +279,44 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
   const [notification, setNotification] = useAtom(notificationAtom);
   const [dashboard, setDashboard] = useAtom(dashboardStateAtom);
   const [credentials, setCredentials] = useAtom(credentialsStateAtom);
+  const [debug, setDebug] = useAtom(debugStateAtom);
+  const [usage, setUsage] = useAtom(usageStateAtom);
   const [auth, setAuth] = useAtom(authStateAtom);
   const [apiTest, setApiTest] = useAtom(apiTestStateAtom);
   const [settings, setSettings] = useAtom(settingsStateAtom);
   const authPollTimerRef = useRef<number | null>(null);
+  const debugAutoRefreshTimerRef = useRef<number | null>(null);
+  const usageAutoRefreshTimerRef = useRef<number | null>(null);
+  const usageRequestRef = useRef(usage.request);
 
-  const showNotification = (
-    type: 'success' | 'error' | 'warning' | 'info',
-    message: string,
-  ) => {
-    setNotification({
-      message,
-      type,
-    });
-  };
+  const showNotification = useCallback(
+    (type: 'success' | 'error' | 'warning' | 'info', message: string) => {
+      setNotification({
+        message,
+        type,
+      });
+    },
+    [setNotification],
+  );
 
   const clearAuthTimer = () => {
     if (authPollTimerRef.current !== null) {
       window.clearTimeout(authPollTimerRef.current);
       authPollTimerRef.current = null;
+    }
+  };
+
+  const clearDebugAutoRefreshTimer = useCallback(() => {
+    if (debugAutoRefreshTimerRef.current !== null) {
+      window.clearInterval(debugAutoRefreshTimerRef.current);
+      debugAutoRefreshTimerRef.current = null;
+    }
+  }, []);
+
+  const clearUsageTimer = () => {
+    if (usageAutoRefreshTimerRef.current !== null) {
+      window.clearTimeout(usageAutoRefreshTimerRef.current);
+      usageAutoRefreshTimerRef.current = null;
     }
   };
 
@@ -312,7 +400,27 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
       items: listResult.data?.credentials ?? [],
       loading: false,
     }));
-  }, [setCredentials]);
+
+    setApiTest((current) => {
+      const validCredentials = (listResult.data?.credentials ?? []).filter(
+        (item) => !item.is_expired,
+      );
+
+      if (
+        current.credentialFilename &&
+        validCredentials.some(
+          (credential) => credential.filename === current.credentialFilename,
+        )
+      ) {
+        return current;
+      }
+
+      return {
+        ...current,
+        credentialFilename: validCredentials[0]?.filename ?? '',
+      };
+    });
+  }, [setApiTest, setCredentials]);
 
   const loadSettings = useCallback(async () => {
     setSettings((current) => ({
@@ -322,17 +430,177 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
 
     const result = await requestJson<SettingsResponse>('/admin-api/settings');
 
+    const nextValues = result.data?.settings ?? {};
+
     setSettings((current) => ({
       ...current,
       labels: result.data?.labels ?? {},
       loading: false,
-      values: result.data?.settings ?? {},
+      values: nextValues,
     }));
-  }, [setSettings]);
+
+    setApiTest((current) => {
+      if (current.model.trim()) {
+        return current;
+      }
+
+      const configuredModels = getConfiguredModels(nextValues.CODEBUDDY_MODELS);
+
+      return {
+        ...current,
+        model: configuredModels[0] ?? current.model,
+      };
+    });
+  }, [setApiTest, setSettings]);
+
+  const loadDebug = useCallback(
+    async ({
+      preserveSettings = false,
+    }: { preserveSettings?: boolean } = {}) => {
+      setDebug((current) => ({
+        ...current,
+        loading: true,
+      }));
+
+      const result = await requestJson<DebugResponse>('/admin-api/debug');
+
+      if (!result.ok) {
+        setDebug((current) => ({
+          ...current,
+          loading: false,
+        }));
+        showNotification(
+          'error',
+          getErrorMessage(result.data, '加载 Debug 记录失败。'),
+        );
+        return;
+      }
+
+      setDebug((current) => ({
+        autoRefreshSeconds: preserveSettings
+          ? current.autoRefreshSeconds
+          : typeof result.data?.autoRefreshSeconds === 'number'
+            ? result.data.autoRefreshSeconds
+            : 0,
+        enabled: preserveSettings
+          ? current.enabled
+          : Boolean(result.data?.enabled),
+        items: result.data?.items ?? [],
+        loading: false,
+        maxEntries: preserveSettings
+          ? current.maxEntries
+          : typeof result.data?.maxEntries === 'number'
+            ? result.data.maxEntries
+            : 100,
+        saving: false,
+      }));
+    },
+    [setDebug, showNotification],
+  );
+
+  const loadUsage = useCallback(
+    async (requestOverride?: Partial<UsageFiltersState>) => {
+      const nextRequest = {
+        ...usageRequestRef.current,
+        ...requestOverride,
+      };
+      usageRequestRef.current = nextRequest;
+
+      setUsage((current) => ({
+        ...current,
+        loading: true,
+        request: nextRequest,
+      }));
+
+      const params = new URLSearchParams({
+        accessKey: nextRequest.accessKey,
+        credential: nextRequest.credential,
+        range: nextRequest.range,
+      });
+      const result = await requestJson<UsageResponse>(
+        `/admin-api/usage?${params.toString()}`,
+      );
+
+      if (!result.ok) {
+        setUsage((current) => ({
+          ...current,
+          loading: false,
+          request: nextRequest,
+        }));
+        showNotification(
+          'error',
+          getErrorMessage(result.data, '加载用量统计数据失败。'),
+        );
+        return;
+      }
+
+      const resolvedRequest = {
+        accessKey: nextRequest.accessKey,
+        credential: nextRequest.credential,
+        range: result.data?.range ?? nextRequest.range,
+      };
+      usageRequestRef.current = resolvedRequest;
+
+      setUsage((current) => ({
+        ...current,
+        callSeries: result.data?.callSeries ?? [],
+        filters: {
+          accessKeys: result.data?.filters?.accessKeys ?? [],
+          credentials: result.data?.filters?.credentials ?? [],
+        },
+        hoveredPoint: null,
+        lastUpdatedAt: new Date().toLocaleTimeString('zh-CN'),
+        loading: false,
+        request: resolvedRequest,
+        tableRows: (result.data?.tableRows ?? []).map((row) => ({
+          callCount: row.callCount ?? 0,
+          cacheHitTokens: row.cacheHitTokens ?? 0,
+          model: row.model ?? 'unknown',
+          totalTokens: row.totalTokens ?? 0,
+        })),
+        todaySummary: {
+          cacheHitTokens: result.data?.todaySummary?.cacheHitTokens ?? 0,
+          callCount: result.data?.todaySummary?.callCount ?? 0,
+          totalTokens: result.data?.todaySummary?.totalTokens ?? 0,
+        },
+        tokenSeries: result.data?.tokenSeries ?? [],
+      }));
+    },
+    [setUsage, showNotification],
+  );
 
   const refreshAdminData = useCallback(async () => {
     await Promise.all([loadDashboard(), loadCredentials()]);
   }, [loadCredentials, loadDashboard]);
+
+  const clearUsageHistory = async () => {
+    setUsage((current) => ({
+      ...current,
+      loading: true,
+    }));
+
+    const result = await requestJson<{ success?: boolean }>(
+      '/admin-api/usage/clear',
+      {
+        method: 'POST',
+      },
+    );
+
+    if (!result.ok || !result.data?.success) {
+      setUsage((current) => ({
+        ...current,
+        loading: false,
+      }));
+      showNotification(
+        'error',
+        getErrorMessage(result.data, '清空用量统计历史失败。'),
+      );
+      return;
+    }
+
+    showNotification('success', '用量统计历史已清空。');
+    await loadUsage();
+  };
 
   const pollAuth = async (overrideState?: string) => {
     const authState = overrideState ?? auth.authState;
@@ -447,7 +715,9 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
   };
 
   const addCredential = async () => {
-    if (!credentials.form.bearerToken.trim()) {
+    const isEditing = credentials.form.editingIndex !== null;
+
+    if (!isEditing && !credentials.form.bearerToken.trim()) {
       showNotification('warning', 'Bearer Token 不能为空。');
       return;
     }
@@ -460,11 +730,23 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
     const result = await requestJson<{ filename?: string; success?: boolean }>(
       '/admin-api/credentials',
       {
-        body: JSON.stringify({
-          access_token: credentials.form.bearerToken.trim(),
-          bearer_token: credentials.form.bearerToken.trim(),
-          user_id: credentials.form.userId.trim() || undefined,
-        }),
+        body: JSON.stringify(
+          isEditing
+            ? {
+                index: credentials.form.editingIndex,
+                first_message_role_to_system:
+                  credentials.form.firstMessageRoleToSystem,
+                responses_passthrough: credentials.form.responsesPassthrough,
+              }
+            : {
+                access_token: credentials.form.bearerToken.trim(),
+                bearer_token: credentials.form.bearerToken.trim(),
+                first_message_role_to_system:
+                  credentials.form.firstMessageRoleToSystem,
+                responses_passthrough: credentials.form.responsesPassthrough,
+                user_id: credentials.form.userId.trim() || undefined,
+              },
+        ),
         headers: {
           'Content-Type': 'application/json',
         },
@@ -486,6 +768,9 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
       actionIndex: null,
       form: {
         bearerToken: '',
+        editingIndex: null,
+        firstMessageRoleToSystem: false,
+        responsesPassthrough: false,
         userId: '',
       },
     }));
@@ -557,7 +842,7 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
         'error',
         getErrorMessage(
           result.data,
-          editingId ? '更新访问 key 失败。' : '创建访问 key 失败。',
+          editingId ? '更新 API Key 失败。' : '创建 API Key 失败。',
         ),
       );
       setCredentials((current) => ({
@@ -586,7 +871,7 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
     }));
     showNotification(
       'success',
-      editingId ? '访问 key 已更新。' : '访问 key 已生成。',
+      editingId ? 'API Key 已更新。' : 'API Key 已生成。',
     );
     await loadCredentials();
   };
@@ -607,7 +892,7 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
     if (!result.ok || !result.data?.success) {
       showNotification(
         'error',
-        getErrorMessage(result.data, '删除访问 key 失败。'),
+        getErrorMessage(result.data, '删除 API Key 失败。'),
       );
       setCredentials((current) => ({
         ...current,
@@ -622,7 +907,7 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
       revealedSecret:
         current.revealedSecret?.id === id ? null : current.revealedSecret,
     }));
-    showNotification('success', '访问 key 已删除。');
+    showNotification('success', 'API Key 已删除。');
     await loadCredentials();
   };
 
@@ -639,7 +924,7 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
     if (!result.ok || !result.data?.secret || !result.data?.name) {
       showNotification(
         'error',
-        getErrorMessage(result.data, '读取访问 key 失败。'),
+        getErrorMessage(result.data, '读取 API Key 失败。'),
       );
       setCredentials((current) => ({
         ...current,
@@ -663,7 +948,7 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
         secret: secretPayload.secret,
       },
     }));
-    showNotification('success', '访问 key 已显示。');
+    showNotification('success', 'API Key 已显示。');
   };
 
   const copyText = async (value: string, successMessage: string) => {
@@ -711,6 +996,7 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
 
     const response = await fetch('/admin-api/chat/completions', {
       body: JSON.stringify({
+        credential_filename: apiTest.credentialFilename || undefined,
         messages: [
           {
             content: apiTest.message,
@@ -801,18 +1087,131 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
       saving: false,
       values: result.data?.settings ?? current.values,
     }));
+    setApiTest((current) => {
+      const configuredModels = getConfiguredModels(
+        result.data?.settings?.CODEBUDDY_MODELS,
+      );
+      const nextModel = configuredModels[0] ?? current.model;
+
+      if (
+        current.model.trim() &&
+        configuredModels.includes(current.model.trim())
+      ) {
+        return current;
+      }
+
+      return {
+        ...current,
+        model: nextModel,
+      };
+    });
     showNotification('success', result.data?.message ?? '设置已保存。');
+  };
+
+  const saveDebugSettings = async () => {
+    setDebug((current) => ({
+      ...current,
+      saving: true,
+    }));
+
+    const result = await requestJson<DebugResponse>('/admin-api/debug', {
+      body: JSON.stringify({
+        autoRefreshSeconds: debug.autoRefreshSeconds,
+        enabled: debug.enabled,
+        maxEntries: debug.maxEntries,
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      method: 'POST',
+    });
+
+    if (!result.ok) {
+      setDebug((current) => ({
+        ...current,
+        saving: false,
+      }));
+      showNotification(
+        'error',
+        getErrorMessage(result.data, '保存 Debug 设置失败。'),
+      );
+      return;
+    }
+
+    setDebug({
+      autoRefreshSeconds:
+        typeof result.data?.autoRefreshSeconds === 'number'
+          ? result.data.autoRefreshSeconds
+          : debug.autoRefreshSeconds,
+      enabled: Boolean(result.data?.enabled),
+      items: result.data?.items ?? [],
+      loading: false,
+      maxEntries:
+        typeof result.data?.maxEntries === 'number'
+          ? result.data.maxEntries
+          : debug.maxEntries,
+      saving: false,
+    });
+    showNotification('success', result.data?.message ?? 'Debug 设置已保存。');
+  };
+
+  const clearDebugItems = async () => {
+    setDebug((current) => ({
+      ...current,
+      saving: true,
+    }));
+
+    const result = await requestJson<DebugResponse>('/admin-api/debug', {
+      method: 'DELETE',
+    });
+
+    if (!result.ok) {
+      setDebug((current) => ({
+        ...current,
+        saving: false,
+      }));
+      showNotification(
+        'error',
+        getErrorMessage(result.data, '清空 Debug 记录失败。'),
+      );
+      return;
+    }
+
+    setDebug((current) => ({
+      ...current,
+      items: [],
+      saving: false,
+    }));
+    showNotification('success', result.data?.message ?? 'Debug 记录已清空。');
   };
 
   useEffect(() => {
     if (!initialData) {
-      void Promise.all([loadDashboard(), loadCredentials(), loadSettings()]);
+      void Promise.all([
+        loadDashboard(),
+        loadCredentials(),
+        loadDebug(),
+        loadUsage(),
+        loadSettings(),
+      ]);
+    } else if (!initialData.usage) {
+      void loadUsage();
     }
 
     return () => {
       clearAuthTimer();
+      clearDebugAutoRefreshTimer();
+      clearUsageTimer();
     };
-  }, [initialData, loadCredentials, loadDashboard, loadSettings]);
+  }, [
+    clearDebugAutoRefreshTimer,
+    initialData,
+    loadCredentials,
+    loadDashboard,
+    loadDebug,
+    loadSettings,
+    loadUsage,
+  ]);
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem(
@@ -830,8 +1229,10 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
 
     if (
       storedTab === 'dashboard' ||
+      storedTab === 'usage' ||
       storedTab === 'credentials' ||
       storedTab === 'api-test' ||
+      storedTab === 'debug' ||
       storedTab === 'settings'
     ) {
       setActiveTab(storedTab);
@@ -883,6 +1284,43 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
       window.clearTimeout(timeoutId);
     };
   }, [notification, setNotification]);
+
+  useEffect(() => {
+    clearDebugAutoRefreshTimer();
+
+    if (!debug.enabled || debug.autoRefreshSeconds <= 0) {
+      return;
+    }
+
+    debugAutoRefreshTimerRef.current = window.setInterval(() => {
+      void loadDebug({ preserveSettings: true });
+    }, debug.autoRefreshSeconds * 1000);
+
+    return () => {
+      clearDebugAutoRefreshTimer();
+    };
+  }, [
+    clearDebugAutoRefreshTimer,
+    debug.autoRefreshSeconds,
+    debug.enabled,
+    loadDebug,
+  ]);
+
+  useEffect(() => {
+    clearUsageTimer();
+
+    if (usage.autoRefreshSeconds <= 0 || activeTab !== 'usage') {
+      return;
+    }
+
+    usageAutoRefreshTimerRef.current = window.setTimeout(() => {
+      void loadUsage();
+    }, usage.autoRefreshSeconds * 1000);
+
+    return () => {
+      clearUsageTimer();
+    };
+  }, [activeTab, loadUsage, usage.autoRefreshSeconds, usage.request]);
 
   return (
     <>
@@ -950,6 +1388,24 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
               onCopyAuthUrl={() => {
                 void copyText(auth.authUrl, '认证链接已复制。');
               }}
+              onCredentialFirstMessageRoleToSystemChange={(value) => {
+                setCredentials((current) => ({
+                  ...current,
+                  form: {
+                    ...current.form,
+                    firstMessageRoleToSystem: value,
+                  },
+                }));
+              }}
+              onCredentialResponsesPassthroughChange={(value) => {
+                setCredentials((current) => ({
+                  ...current,
+                  form: {
+                    ...current.form,
+                    responsesPassthrough: value,
+                  },
+                }));
+              }}
               onCredentialTokenChange={(value) => {
                 setCredentials((current) => ({
                   ...current,
@@ -971,6 +1427,19 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
               onDeleteCredential={(index) => {
                 void deleteCredential(index);
               }}
+              onEditCredential={(credential) => {
+                setCredentials((current) => ({
+                  ...current,
+                  form: {
+                    bearerToken: '',
+                    editingIndex: credential.index,
+                    firstMessageRoleToSystem:
+                      credential.first_message_role_to_system,
+                    responsesPassthrough: credential.responses_passthrough,
+                    userId: credential.user_id ?? '',
+                  },
+                }));
+              }}
               onDeleteAccessKey={(id) => {
                 void deleteAccessKey(id);
               }}
@@ -978,7 +1447,14 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
                 setCredentials((current) => ({
                   ...current,
                   accessKeyForm: {
-                    credentialFilenames: [...accessKey.credentialFilenames],
+                    credentialFilenames: accessKey.credentialFilenames.filter(
+                      (filename) =>
+                        current.items.some(
+                          (credential) =>
+                            !credential.is_expired &&
+                            credential.filename === filename,
+                        ),
+                    ),
                     editingId: accessKey.id,
                     name: accessKey.name,
                   },
@@ -997,6 +1473,18 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
               }}
               onRefreshCredentials={() => {
                 void refreshAdminData();
+              }}
+              onResetCredentialForm={() => {
+                setCredentials((current) => ({
+                  ...current,
+                  form: {
+                    bearerToken: '',
+                    editingIndex: null,
+                    firstMessageRoleToSystem: false,
+                    responsesPassthrough: false,
+                    userId: '',
+                  },
+                }));
               }}
               onRevealAccessKeySecret={(id) => {
                 void revealAccessKeySecret(id);
@@ -1057,8 +1545,56 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
               }}
             />
           ) : null}
+          {activeTab === 'usage' ? (
+            <UsageSection
+              onAccessKeyChange={(value) => {
+                void loadUsage({
+                  accessKey: value,
+                });
+              }}
+              onClearHistory={() => {
+                void clearUsageHistory();
+              }}
+              onCredentialChange={(value) => {
+                void loadUsage({
+                  credential: value,
+                });
+              }}
+              onHoverPoint={(point) => {
+                setUsage((current) => ({
+                  ...current,
+                  hoveredPoint: point,
+                }));
+              }}
+              onRangeChange={(value) => {
+                void loadUsage({
+                  range: value,
+                });
+              }}
+              onRefresh={() => {
+                void loadUsage();
+              }}
+              onAutoRefreshSecondsChange={(value) => {
+                setUsage((current) => ({
+                  ...current,
+                  autoRefreshSeconds: value,
+                  autoRefreshVisible: true,
+                }));
+              }}
+              state={usage}
+            />
+          ) : null}
           {activeTab === 'api-test' ? (
             <ApiTestSection
+              credentialOptions={credentials.items.filter(
+                (item) => !item.is_expired,
+              )}
+              onCredentialChange={(value) => {
+                setApiTest((current) => ({
+                  ...current,
+                  credentialFilename: value,
+                }));
+              }}
               models={String(settings.values.CODEBUDDY_MODELS ?? '')
                 .split(',')
                 .map((item) => item.trim())
@@ -1085,6 +1621,42 @@ const AdminConsole = ({ initialData }: AdminConsoleProps) => {
                 void testApi();
               }}
               state={apiTest}
+            />
+          ) : null}
+          {activeTab === 'debug' ? (
+            <DebugSection
+              autoRefreshOptions={[...DEBUG_AUTO_REFRESH_OPTIONS]}
+              onClear={() => {
+                void clearDebugItems();
+              }}
+              onCopy={(value) => {
+                void copyText(value, '内容已复制。');
+              }}
+              onAutoRefreshSecondsChange={(value) => {
+                setDebug((current) => ({
+                  ...current,
+                  autoRefreshSeconds: value,
+                }));
+              }}
+              onEnabledChange={(value) => {
+                setDebug((current) => ({
+                  ...current,
+                  enabled: value,
+                }));
+              }}
+              onMaxEntriesChange={(value) => {
+                setDebug((current) => ({
+                  ...current,
+                  maxEntries: value,
+                }));
+              }}
+              onRefresh={() => {
+                void loadDebug({ preserveSettings: true });
+              }}
+              onSave={() => {
+                void saveDebugSettings();
+              }}
+              state={debug}
             />
           ) : null}
           {activeTab === 'settings' ? (

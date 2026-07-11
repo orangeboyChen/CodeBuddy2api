@@ -4,13 +4,13 @@ import path from 'node:path';
 import { NextRequest } from 'next/server';
 
 import { handleMessagesRequest } from '@/lib/server/anthropic';
+import { addCredential } from '@/lib/server/credentials';
 
-const tempConfigDir = path.join(process.cwd(), '.tmp-test-config-anthropic');
-const tempCredsDir = path.join(process.cwd(), '.tmp-test-creds-anthropic');
+const repoRoot = process.cwd();
+const tempRootDir = path.join(repoRoot, '.tmp-test-config-anthropic-root');
 
 const cleanupTempState = (): void => {
-  fs.rmSync(tempConfigDir, { force: true, recursive: true });
-  fs.rmSync(tempCredsDir, { force: true, recursive: true });
+  fs.rmSync(tempRootDir, { force: true, recursive: true });
 };
 
 const makeNextRequest = (
@@ -45,11 +45,15 @@ describe('anthropic messages api', () => {
   beforeEach(() => {
     cleanupTempState();
     vi.restoreAllMocks();
-    process.env.CODEBUDDY_CONFIG_PATH =
-      '.tmp-test-config-anthropic/config.json';
-    process.env.CODEBUDDY_CREDS_DIR = '.tmp-test-creds-anthropic';
-    process.env.CODEBUDDY_AUTH_MODE = 'api_key';
-    process.env.CODEBUDDY_API_KEY = 'cb-key';
+    vi.spyOn(process, 'cwd').mockReturnValue(tempRootDir);
+    process.env.CODEBUDDY_CONFIG_PATH = 'config/config.json';
+    process.env.CODEBUDDY_AUTH_MODE = 'auto';
+    addCredential({
+      bearer_token: 'anthropic-test-token',
+      first_message_role_to_system: false,
+      responses_passthrough: false,
+      user_id: 'anthropic@example.com',
+    });
   });
 
   afterEach(() => {

@@ -1,13 +1,14 @@
 import { headers } from 'next/headers';
 
-import type { AdminConsoleInitialData } from '@/app/admin/_components/admin-initial-state';
 import AdminConsole from '@/app/admin/_components/admin-console';
+import type { AdminConsoleInitialData } from '@/app/admin/_components/admin-initial-state';
 import type {
   AccessKeySummary,
   CredentialSummary,
 } from '@/app/admin/_components/admin-store';
 import { listAccessKeys } from '@/lib/server/access-keys';
 import { SETTING_LABELS, getActiveConfig } from '@/lib/server/config';
+import { getDebugSettings, listDebugLogs } from '@/lib/server/debug';
 import {
   getCurrentCredentialInfo,
   listCredentials,
@@ -29,6 +30,7 @@ const buildApiEndpoint = async () => {
 
 const getInitialData = async (): Promise<AdminConsoleInitialData> => {
   const timestamp = new Date().toISOString();
+  const debugSettings = getDebugSettings();
 
   return {
     accessKeys: listAccessKeys().access_keys as unknown as AccessKeySummary[],
@@ -37,11 +39,17 @@ const getInitialData = async (): Promise<AdminConsoleInitialData> => {
       .credentials as unknown as CredentialSummary[],
     currentCredential:
       getCurrentCredentialInfo() as unknown as AdminConsoleInitialData['currentCredential'],
+    debug: {
+      autoRefreshSeconds: debugSettings.autoRefreshSeconds,
+      enabled: debugSettings.enabled,
+      items: listDebugLogs(),
+      maxEntries: debugSettings.maxEntries,
+    },
     health: {
-      checkedAtLabel: new Date(timestamp).toLocaleTimeString('zh-CN'),
+      checkedAtLabel: '',
       status: 'healthy',
       timestamp,
-      uptimeText: `最后检查 ${new Date(timestamp).toLocaleString('zh-CN')}`,
+      uptimeText: '',
     },
     settings: {
       labels: SETTING_LABELS,

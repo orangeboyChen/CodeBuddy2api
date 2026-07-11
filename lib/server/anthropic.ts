@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 
-import { getAvailableModels } from './config';
+import { getDefaultModel } from './config';
+import type { DebugTrace } from './debug';
 
 import { proxyChatCompletions } from './codebuddy';
 
@@ -351,7 +352,10 @@ const buildChatRequestBody = (
   messages.push(...chatMessages);
 
   const result: Record<string, unknown> = {
-    model: body.model ?? getAvailableModels()[0] ?? 'claude-sonnet-4.6',
+    model:
+      typeof body.model === 'string' && body.model.trim()
+        ? body.model
+        : getDefaultModel('claude-sonnet-4.6'),
     messages,
     stream: body.stream ?? false,
     max_tokens: body.max_tokens,
@@ -839,6 +843,7 @@ const mapOpenAIStreamToAnthropicSSE = (
 export const handleMessagesRequest = async (
   request: NextRequest,
   body: AnthropicMessagesRequestBody,
+  debugTrace?: DebugTrace,
 ): Promise<Response> => {
   if (!body.messages?.length) {
     return createAnthropicError(400, 'messages is required');
@@ -846,7 +851,13 @@ export const handleMessagesRequest = async (
 
   try {
     const chatBody = buildChatRequestBody(body);
-    const upstreamResponse = await proxyChatCompletions(request, chatBody);
+    const upstreamResponse = await proxyChatCompletions(
+      request,
+      chatBody,
+      undefined,
+      debugTrace,
+      '/v1/messages',
+    );
 
     if (!upstreamResponse.ok) {
       return upstreamResponse;
