@@ -193,8 +193,24 @@ const readJsonFile = <T>(filePath: string): T | null => {
 };
 
 const writeJsonFile = (filePath: string, value: unknown): void => {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(value, null, 2));
+  const directory = path.dirname(filePath);
+  const mode = fs.existsSync(filePath)
+    ? fs.statSync(filePath).mode & 0o777
+    : 0o600;
+  const temporaryPath = path.join(
+    directory,
+    `.${path.basename(filePath)}.${process.pid}.${crypto.randomUUID()}.tmp`,
+  );
+
+  fs.mkdirSync(directory, { recursive: true });
+
+  try {
+    fs.writeFileSync(temporaryPath, JSON.stringify(value, null, 2), { mode });
+    fs.renameSync(temporaryPath, filePath);
+  } catch (error) {
+    fs.rmSync(temporaryPath, { force: true });
+    throw error;
+  }
 };
 
 const getDocumentPath = (namespace: string, key: string): string => {

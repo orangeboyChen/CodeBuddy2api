@@ -29,6 +29,7 @@ const PASSWORD_MIN_LENGTH = 8;
 const ADMIN_RP_NAME = 'CodeBuddy2API Admin';
 const ADMIN_USER_ID = 'codebuddy-admin';
 const ADMIN_USER_NAME = 'admin';
+let adminAuthMutationQueue: Promise<void> = Promise.resolve();
 
 type RequestLike = Request | NextRequest;
 
@@ -72,6 +73,18 @@ interface AdminAuthState {
 }
 
 class AdminAuthStorageError extends Error {}
+
+const enqueueAdminAuthMutation = async <T>(
+  mutation: () => Promise<T>,
+): Promise<T> => {
+  const operation = adminAuthMutationQueue.then(mutation, mutation);
+  adminAuthMutationQueue = operation.then(
+    () => undefined,
+    () => undefined,
+  );
+
+  return operation;
+};
 
 const getEmptyAdminAuthState = (): AdminAuthState => {
   return {
@@ -232,10 +245,12 @@ const pruneExpiredState = (state: AdminAuthState): AdminAuthState => {
 const mutateAdminAuthState = async <T>(
   mutator: (state: AdminAuthState) => T | Promise<T>,
 ): Promise<T> => {
-  const state = pruneExpiredState(await loadAdminAuthStateAsync());
-  const result = await mutator(state);
-  await saveAdminAuthState(state);
-  return result;
+  return enqueueAdminAuthMutation(async () => {
+    const state = pruneExpiredState(await loadAdminAuthStateAsync());
+    const result = await mutator(state);
+    await saveAdminAuthState(state);
+    return result;
+  });
 };
 
 const createAdminSession = () => {
@@ -465,7 +480,24 @@ export const setupAdminPassword = async (
     );
   }
 
-  if (await hasAdminAccountAsync()) {
+  const nextPassword = createPasswordHash(normalized);
+  const { session, token } = createAdminSession();
+
+  const configured = await mutateAdminAuthState((state) => {
+    if (state.password || state.passkeys.length) {
+      return false;
+    }
+
+    state.password = {
+      hash: nextPassword.hash,
+      salt: nextPassword.salt,
+      updatedAt: new Date().toISOString(),
+    };
+    state.sessions.push(session);
+    return true;
+  });
+
+  if (!configured) {
     return Response.json(
       {
         error: {
@@ -475,18 +507,6 @@ export const setupAdminPassword = async (
       { status: 409 },
     );
   }
-
-  const nextPassword = createPasswordHash(normalized);
-  const { session, token } = createAdminSession();
-
-  await mutateAdminAuthState((state) => {
-    state.password = {
-      hash: nextPassword.hash,
-      salt: nextPassword.salt,
-      updatedAt: new Date().toISOString(),
-    };
-    state.sessions.push(session);
-  });
 
   return attachSessionCookie(
     request,

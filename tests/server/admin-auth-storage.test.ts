@@ -160,6 +160,18 @@ describe('admin auth and storage', () => {
     expect(getCookieHeader(logoutResponse)).toContain('Max-Age=0');
   });
 
+  it('allows only one concurrent bootstrap password setup', async () => {
+    const responses = await Promise.all([
+      setupAdminPassword(makeRequest('/admin-api/auth/setup'), 'password one'),
+      setupAdminPassword(makeRequest('/admin-api/auth/setup'), 'password two'),
+    ]);
+
+    expect(responses.map((response) => response.status).sort()).toEqual([
+      200, 409,
+    ]);
+    expect(await hasAdminAccountAsync()).toBe(true);
+  });
+
   it('requires an admin session before starting or polling OAuth credentials', async () => {
     await setupAdminPassword(
       makeRequest('/admin-api/auth/setup'),
