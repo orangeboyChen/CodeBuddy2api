@@ -71,6 +71,7 @@ import {
 const repoRoot = process.cwd();
 const tempRootDir = path.join(repoRoot, '.tmp-test-config-units-root');
 const tempConfigDir = path.join(tempRootDir, 'config');
+const tempAccessKeysPath = path.join(tempConfigDir, 'access-keys.json');
 
 const cleanupTempState = (): void => {
   fs.rmSync(tempRootDir, { force: true, recursive: true, maxRetries: 5 });
@@ -105,6 +106,8 @@ describe('server units', () => {
     vi.spyOn(process, 'cwd').mockReturnValue(tempRootDir);
     process.env.CODEBUDDY_CONFIG_PATH = 'config/config.json';
     process.env.CODEBUDDY_AUTH_MODE = 'auto';
+    process.env.CODEBUDDY_API_KEY = '';
+    fs.rmSync(tempAccessKeysPath, { force: true });
     addCredential({
       bearer_token: 'default-test-token',
       first_message_role_to_system: false,
@@ -115,6 +118,7 @@ describe('server units', () => {
 
   afterEach(() => {
     cleanupTempState();
+    delete process.env.CODEBUDDY_API_KEY;
   });
 
   it('masks sensitive debug headers and body fields', () => {
