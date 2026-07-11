@@ -29,6 +29,71 @@ type AccessKeyStoreState =
   | { kind: 'missing'; store: AccessKeyStore }
   | { kind: 'error'; error: string; store: AccessKeyStore };
 
+const normalizeCredentialFilenames = (
+  credentialFilenames: string[],
+): string[] => {
+  return Array.from(
+    new Set(credentialFilenames.map((item) => item.trim()).filter(Boolean)),
+  ).sort((left, right) => left.localeCompare(right));
+};
+
+const pruneAccessKeyStore = async (
+  store: AccessKeyStore,
+): Promise<{ changed: boolean; store: AccessKeyStore }> => {
+  let changed = false;
+  const accessKeys = await Promise.all(
+    store.accessKeys.map(async (record) => {
+      const credentialFilenames = normalizeCredentialFilenames(
+        record.credentialFilenames,
+      );
+      const availableFilenames = await Promise.all(
+        credentialFilenames.map(async (filename) => {
+          const result = await readStorageJsonResult<unknown>(
+            'credentials',
+            filename,
+          );
+
+          return result.exists || result.error ? filename : null;
+        }),
+      );
+      const remainingFilenames = availableFilenames.filter(
+        (filename): filename is string => filename !== null,
+      );
+
+      if (remainingFilenames.length !== record.credentialFilenames.length) {
+        changed = true;
+      }
+
+      if (!remainingFilenames.length) {
+        changed = true;
+        return null;
+      }
+
+      if (
+        remainingFilenames.some(
+          (filename, index) => filename !== record.credentialFilenames[index],
+        )
+      ) {
+        changed = true;
+      }
+
+      return {
+        ...record,
+        credentialFilenames: remainingFilenames,
+      };
+    }),
+  );
+
+  return {
+    changed,
+    store: {
+      accessKeys: accessKeys.filter(
+        (record): record is AccessKeyRecord => record !== null,
+      ),
+    },
+  };
+};
+
 const readAccessKeyStoreState = async (): Promise<AccessKeyStoreState> => {
   const parsedResult = await readStorageJsonResult<Partial<AccessKeyStore>>(
     'access-keys',
@@ -68,9 +133,15 @@ const readAccessKeyStoreState = async (): Promise<AccessKeyStoreState> => {
         })
       : [];
 
+    const normalizedStore = await pruneAccessKeyStore({ accessKeys });
+
+    if (normalizedStore.changed) {
+      await writeAccessKeyStore(normalizedStore.store);
+    }
+
     return {
       kind: 'ok',
-      store: { accessKeys },
+      store: normalizedStore.store,
     };
   } catch (error) {
     return {
@@ -90,14 +161,6 @@ const readAccessKeyStore = async (): Promise<AccessKeyStore> => {
 
 const writeAccessKeyStore = async (store: AccessKeyStore): Promise<void> => {
   await writeStorageJson('access-keys', 'store', store);
-};
-
-const normalizeCredentialFilenames = (
-  credentialFilenames: string[],
-): string[] => {
-  return Array.from(
-    new Set(credentialFilenames.map((item) => item.trim()).filter(Boolean)),
-  ).sort((left, right) => left.localeCompare(right));
 };
 
 const maskSecret = (secret: string): string => {

@@ -260,7 +260,7 @@ describe('storage backends', () => {
 
     expect(await storage.readStorageJsonResult('usage', 'history')).toEqual({
       error: null,
-      exists: true,
+      exists: false,
       value: null,
     });
 

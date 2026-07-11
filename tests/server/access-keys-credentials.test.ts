@@ -88,7 +88,7 @@ describe('access key credential reconciliation', () => {
     expect(await findAccessKeyById(singleKey.access_key.id)).toBeNull();
   });
 
-  it('preserves access keys when a referenced credential is unavailable', async () => {
+  it('prunes missing credential references while retaining corrupt ones', async () => {
     const firstCredential = await addCredential({
       bearer_token: 'token-first',
       user_id: 'first@example.com',
@@ -121,23 +121,46 @@ describe('access key credential reconciliation', () => {
 
     expect(await listStoredAccessKeys()).toEqual([
       expect.objectContaining({
-        credentialFilenames: ['missing.json', firstCredential.filename],
+        credentialFilenames: [firstCredential.filename],
         id: 'stale-and-valid',
-      }),
-      expect.objectContaining({
-        credentialFilenames: ['missing.json'],
-        id: 'stale-only',
       }),
     ]);
     expect(await hasAccessKeys()).toBe(true);
-    expect(await findAccessKeyBySecret('cb2_stalesecret')).toMatchObject({
-      id: 'stale-only',
-    });
+    expect(await findAccessKeyBySecret('cb2_stalesecret')).toBeNull();
 
     const persisted = JSON.parse(
       fs.readFileSync(path.join(tempDataDir, 'access-keys.json'), 'utf8'),
     ) as { accessKeys: Array<{ credentialFilenames: string[]; id: string }> };
-    expect(persisted.accessKeys).toHaveLength(2);
+    expect(persisted.accessKeys).toHaveLength(1);
+
+    const corruptCredential = await addCredential({
+      bearer_token: 'token-corrupt',
+      user_id: 'corrupt@example.com',
+    });
+    fs.writeFileSync(
+      path.join(tempRootDir, '.codebuddy_creds', corruptCredential.filename),
+      '{',
+    );
+    fs.writeFileSync(
+      path.join(tempDataDir, 'access-keys.json'),
+      JSON.stringify({
+        accessKeys: [
+          {
+            id: 'corrupt-only',
+            name: 'Corrupt Only',
+            secret: 'cb2_corruptsecret',
+            createdAt: '2026-07-10T00:00:00.000Z',
+            updatedAt: '2026-07-10T00:00:00.000Z',
+            credentialFilenames: [corruptCredential.filename],
+          },
+        ],
+      }),
+    );
+
+    expect(await hasAccessKeys()).toBe(true);
+    expect(await findAccessKeyBySecret('cb2_corruptsecret')).toMatchObject({
+      id: 'corrupt-only',
+    });
   });
 
   it('supports direct credential reference cleanup helper', async () => {

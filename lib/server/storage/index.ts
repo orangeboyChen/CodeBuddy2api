@@ -641,11 +641,21 @@ export const readStorageJsonResult = async <T>(
     return readFileStorageDocument<T>(namespace, key);
   }
 
-  return {
-    error: null,
-    exists: true,
-    value: await getRuntime().backend.getJson<T>(namespace, key),
-  };
+  try {
+    const value = await getRuntime().backend.getJson<T>(namespace, key);
+
+    return {
+      error: null,
+      exists: value !== null,
+      value,
+    };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : 'Failed to read storage',
+      exists: true,
+      value: null,
+    };
+  }
 };
 
 export const listStorageJson = async <T>(
