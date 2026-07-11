@@ -44,6 +44,7 @@ import {
   resumeAutoRotation,
   selectCredential,
   toggleAutoRotation,
+  updateCredentialByIndex,
 } from '@/lib/server/credentials';
 import {
   handleResponsesRequest,
@@ -2055,6 +2056,43 @@ describe('server units', () => {
     expect(() =>
       resolveProxyContextByCredentialFilename('missing.json'),
     ).toThrow('Selected credential was not found');
+  });
+
+  it('updates saved credentials by index and normalizes string boolean flags', () => {
+    const createdCredential = addCredential({
+      bearer_token: 'token-original',
+      first_message_role_to_system: false,
+      responses_passthrough: false,
+      user_id: 'update@example.com',
+    });
+
+    expect(() =>
+      updateCredentialByIndex(99, {
+        bearer_token: 'missing',
+      }),
+    ).toThrow('Invalid credential index');
+
+    const listedBefore = listCredentials();
+    const targetIndex = listedBefore.credentials.findIndex(
+      (credential) => credential.filename === createdCredential.filename,
+    );
+    expect(targetIndex).toBeGreaterThanOrEqual(0);
+
+    const updated = updateCredentialByIndex(targetIndex, {
+      bearer_token: 'token-updated',
+      first_message_role_to_system: 'true' as unknown as boolean,
+      responses_passthrough: 'false' as unknown as boolean,
+      user_id: 'update@example.com',
+    });
+    expect(updated.filename).toBe(createdCredential.filename);
+    expect(updated.success).toBe(true);
+
+    const resolved = resolveProxyContextByCredentialFilename(
+      createdCredential.filename,
+    );
+    expect(resolved.auth.bearerToken).toBe('token-updated');
+    expect(resolved.preferences.firstMessageRoleToSystem).toBe(true);
+    expect(resolved.preferences.responsesPassthrough).toBe(false);
   });
 
   it('returns models in both OpenAI-compatible and admin-friendly shapes', async () => {
