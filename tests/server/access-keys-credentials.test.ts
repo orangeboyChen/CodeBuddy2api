@@ -190,4 +190,26 @@ describe('access key credential reconciliation', () => {
       false,
     );
   });
+
+  it('keeps concurrent credentials for the same user in separate files', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_783_787_200_000);
+
+    const [first, second] = await Promise.all([
+      addCredential({
+        bearer_token: 'token-one',
+        user_id: 'same@example.com',
+      }),
+      addCredential({
+        bearer_token: 'token-two',
+        user_id: 'same@example.com',
+      }),
+    ]);
+
+    expect(first.filename).not.toBe(second.filename);
+    expect(
+      (await listCredentials()).credentials.filter(
+        (credential) => credential.user_id === 'same@example.com',
+      ),
+    ).toHaveLength(2);
+  });
 });

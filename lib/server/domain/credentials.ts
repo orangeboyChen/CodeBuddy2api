@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import path from 'node:path';
 
 import {
@@ -386,7 +387,9 @@ export const addCredential = async (
   const userId = String(credentialData.user_id ?? 'unknown');
   const safeUserId =
     userId.replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 20) || 'unknown';
-  const resolvedFilename = filename ?? `codebuddy_${safeUserId}_${now}.json`;
+  const resolvedFilename =
+    filename ??
+    `codebuddy_${safeUserId}_${now}_${crypto.randomUUID().slice(0, 8)}.json`;
   const jsonFilename = resolvedFilename.endsWith('.json')
     ? resolvedFilename
     : `${resolvedFilename}.json`;
