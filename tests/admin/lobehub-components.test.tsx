@@ -62,4 +62,31 @@ describe('LobeHub admin components', () => {
       document.querySelector('#dashboard > div:first-child')?.children,
     ).toHaveLength(4);
   });
+
+  it('keeps the initial service status time visible', () => {
+    renderWithMessages(
+      <DashboardSection
+        onCopyEndpoint={vi.fn()}
+        onRefresh={vi.fn()}
+        state={{
+          apiEndpoint: 'http://localhost:8001/v1',
+          credentialUsage: [],
+          credentialUsagePercent: 0,
+          lastCheckedAt: 'Last checked 7/12/2026, 5:00:00 PM',
+          loading: false,
+          modelUsage: [],
+          serviceStatus: 'online',
+          statusText: 'Running',
+          totalApiCalls: 0,
+          totalCredentials: 0,
+          uptimeText: '',
+          validCredentials: 0,
+        }}
+      />,
+    );
+
+    expect(document.getElementById('uptime')).toHaveTextContent(
+      'Last checked 7/12/2026, 5:00:00 PM',
+    );
+  });
 });

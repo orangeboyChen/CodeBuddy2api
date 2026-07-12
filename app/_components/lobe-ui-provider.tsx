@@ -1,6 +1,7 @@
 'use client';
 
 import { ConfigProvider, ThemeProvider } from '@lobehub/ui';
+import { ConfigProvider as AntdConfigProvider } from 'antd';
 import { motion } from 'motion/react';
 import { useEffect, useState, type ReactNode } from 'react';
 
@@ -37,14 +38,16 @@ const LobeUiProvider = ({ children, initialTheme }: LobeUiProviderProps) => {
   }, []);
 
   return (
-    <ConfigProvider motion={motion}>
-      <ThemeProvider
-        appearance={appearance}
-        themeMode={resolveThemeMode(appearance)}
-      >
-        {children}
-      </ThemeProvider>
-    </ConfigProvider>
+    <AntdConfigProvider theme={{ cssVar: { key: 'codebuddy2api' } }}>
+      <ConfigProvider motion={motion}>
+        <ThemeProvider
+          appearance={appearance}
+          themeMode={resolveThemeMode(appearance)}
+        >
+          {children}
+        </ThemeProvider>
+      </ConfigProvider>
+    </AntdConfigProvider>
   );
 };
 

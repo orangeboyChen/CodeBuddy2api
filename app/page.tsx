@@ -20,6 +20,7 @@ import {
   listCredentials,
 } from '@/lib/server/domain/credentials';
 import { getUsageStats } from '@/lib/server/domain/stats';
+import { getUsageAnalytics } from '@/lib/server/domain/usage';
 import {
   defaultLocale,
   localeCookieName,
@@ -47,6 +48,19 @@ const resolveLocale = (cookieValue: string | undefined): AppLocale => {
     : defaultLocale;
 };
 
+const formatInitialHealthLabel = (locale: AppLocale, timestamp: string) => {
+  const checkedAt = new Date(timestamp).toLocaleString(locale);
+
+  switch (locale) {
+    case 'en-US':
+      return `Last checked ${checkedAt}`;
+    case 'ja-JP':
+      return `最終確認: ${checkedAt}`;
+    default:
+      return `最后检查于 ${checkedAt}`;
+  }
+};
+
 const getInitialData = async (
   locale: AppLocale,
 ): Promise<AdminConsoleInitialData> => {
@@ -60,6 +74,7 @@ const getInitialData = async (
     debugItems,
     activeConfig,
     stats,
+    usage,
   ] = await Promise.all([
     listAccessKeys(),
     buildApiEndpoint(),
@@ -69,6 +84,7 @@ const getInitialData = async (
     listDebugLogs(),
     getActiveConfig(),
     getUsageStats(),
+    getUsageAnalytics({ range: '24h' }),
   ]);
 
   return {
@@ -84,16 +100,17 @@ const getInitialData = async (
       maxEntries: debugSettings.maxEntries,
     },
     health: {
-      checkedAtLabel: '',
+      checkedAtLabel: formatInitialHealthLabel(locale, timestamp),
       status: 'healthy',
       timestamp,
-      uptimeText: '',
+      uptimeText: formatInitialHealthLabel(locale, timestamp),
     },
     settings: {
       labels: getSettingLabels(locale),
       values: { ...activeConfig },
     },
     stats,
+    usage,
   };
 };
 

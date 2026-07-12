@@ -71,6 +71,7 @@ import {
   getUsageAnalytics,
   recordUsageEvent,
 } from '@/lib/server/domain/usage';
+import { resetStorageRuntime } from '@/lib/server/storage';
 
 const repoRoot = process.cwd();
 const tempRootDir = path.join(repoRoot, '.tmp-test-config-units-root');
@@ -1112,6 +1113,56 @@ describe('server units', () => {
       JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body))
         .response_format,
     ).toBeUndefined();
+  });
+
+  it('persists successful proxy calls without upstream usage across runtime restarts', async () => {
+    const credential = (await listCredentials()).credentials[0];
+    expect(credential).toBeDefined();
+
+    const context = await resolveProxyContextByCredentialFilename(
+      String(credential?.filename),
+    );
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      makeJsonResponse({
+        choices: [{ message: { content: 'ok' } }],
+        model: 'glm-5.1',
+      }),
+    );
+
+    const response = await proxyChatCompletions(
+      makeNextRequest('http://localhost/v1/chat/completions', {
+        method: 'POST',
+      }),
+      {
+        messages: [{ content: 'persist this call', role: 'user' }],
+      },
+      context,
+    );
+    expect(response.status).toBe(200);
+
+    resetStorageRuntime();
+
+    expect((await getUsageAnalytics({ range: 'today' })).tableRows).toEqual([
+      {
+        callCount: 1,
+        cacheHitTokens: 0,
+        model: 'glm-5.1',
+        totalTokens: 0,
+      },
+    ]);
+    expect(
+      JSON.parse(
+        fs.readFileSync(path.join(tempDataDir, 'usage-history.json'), 'utf8'),
+      ),
+    ).toMatchObject({
+      events: [
+        {
+          callCount: 1,
+          model: 'glm-5.1',
+          totalTokens: 0,
+        },
+      ],
+    });
   });
 
   it('normalizes developer messages for chat upstream based on position', async () => {

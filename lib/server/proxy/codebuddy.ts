@@ -113,7 +113,7 @@ const toUsageSnapshot = (usage: unknown): UsageSnapshot | null => {
   return usage as UsageSnapshot;
 };
 
-const recordProxyUsage = ({
+const recordProxyUsage = async ({
   model,
   proxyContext,
   route,
@@ -123,14 +123,14 @@ const recordProxyUsage = ({
   proxyContext: ProxyContext;
   route: string;
   usage: unknown;
-}) => {
-  void recordUsageEvent({
+}): Promise<void> => {
+  await recordUsageEvent({
     accessKeyId: proxyContext.accessKeyId,
     accessKeyName: proxyContext.accessKeyName,
     credentialFilename: proxyContext.credentialFilename,
     model,
     route,
-    usage: toUsageSnapshot(usage),
+    usage: toUsageSnapshot(usage) ?? {},
   });
 };
 
@@ -163,7 +163,7 @@ const parseUsageHeader = (response: Response): unknown => {
   }
 };
 
-const trackResponsesUsageStream = ({
+const trackResponsesUsageStream = async ({
   fallbackUsage,
   model,
   proxyContext,
@@ -173,9 +173,9 @@ const trackResponsesUsageStream = ({
   model: string;
   proxyContext: ProxyContext;
   upstreamResponse: Response;
-}): Response => {
+}): Promise<Response> => {
   if (!upstreamResponse.body) {
-    recordProxyUsage({
+    await recordProxyUsage({
       model,
       proxyContext,
       route: '/v1/responses',
@@ -226,7 +226,7 @@ const trackResponsesUsageStream = ({
             controller.enqueue(encoder.encode(buffer));
           }
 
-          recordProxyUsage({
+          await recordProxyUsage({
             model,
             proxyContext,
             route: '/v1/responses',
@@ -793,7 +793,7 @@ const normalizeStreamingResponse = ({
             flushFrames([buffer]);
           }
 
-          recordProxyUsage({
+          await recordProxyUsage({
             model,
             proxyContext,
             route,
@@ -1043,7 +1043,7 @@ export const proxyChatCompletions = async (
         usage = null;
       }
 
-      recordProxyUsage({
+      await recordProxyUsage({
         model: String(upstreamBody.model ?? 'unknown'),
         proxyContext: resolvedContext,
         route: usageRoute,
@@ -1063,7 +1063,7 @@ export const proxyChatCompletions = async (
       String(upstreamBody.model ?? 'unknown'),
     );
 
-    recordProxyUsage({
+    await recordProxyUsage({
       model: aggregated.model,
       proxyContext: resolvedContext,
       route: usageRoute,
@@ -1155,7 +1155,7 @@ export const proxyResponsesUpstream = async (
         // Preserve malformed upstream JSON while retaining header usage.
       }
 
-      recordProxyUsage({
+      await recordProxyUsage({
         model,
         proxyContext: resolvedContext,
         route: '/v1/responses',
@@ -1177,7 +1177,7 @@ export const proxyResponsesUpstream = async (
       });
     }
 
-    recordProxyUsage({
+    await recordProxyUsage({
       model,
       proxyContext: resolvedContext,
       route: '/v1/responses',

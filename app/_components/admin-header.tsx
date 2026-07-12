@@ -1,7 +1,8 @@
 'use client';
 
-import { Block, Flexbox, Select, Text } from '@lobehub/ui';
-import { Languages, Monitor, Moon, Sun } from 'lucide-react';
+import { Block, Button, Flexbox, Text } from '@lobehub/ui';
+import { DropdownMenu, Select } from '@lobehub/ui/base-ui';
+import { Languages, Menu, Monitor, Moon, Sun } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import type { ThemeMode } from '@/app/admin/_components/admin-store';
@@ -81,6 +82,51 @@ export const AdminHeader = ({
         </label>
         {action}
       </Flexbox>
+      <div className="admin-header-mobile-menu">
+        <DropdownMenu
+          items={[
+            {
+              children: locales.map((item) => ({
+                key: item,
+                label: localeLabels[item] ?? item,
+                onClick: () => onLocaleChange(item),
+              })),
+              icon: Languages,
+              key: 'locale',
+              label: localeLabels[locale] ?? locale,
+              type: 'submenu',
+            },
+            {
+              children: [
+                {
+                  key: 'light',
+                  label: themeLabels.light,
+                  onClick: () => onThemeChange('light'),
+                },
+                {
+                  key: 'dark',
+                  label: themeLabels.dark,
+                  onClick: () => onThemeChange('dark'),
+                },
+                {
+                  key: 'system',
+                  label: themeLabels.system,
+                  onClick: () => onThemeChange('system'),
+                },
+              ],
+              icon: ThemeIcon,
+              key: 'theme',
+              label: themeLabels[theme],
+              type: 'submenu',
+            },
+          ]}
+          footer={action ?? undefined}
+          nativeButton
+          placement="bottomRight"
+        >
+          <Button aria-label="Console menu" icon={Menu} />
+        </DropdownMenu>
+      </div>
     </Block>
   );
 };

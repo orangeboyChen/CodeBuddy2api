@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import { AntdRegistry } from '@ant-design/nextjs-registry';
 import { NextIntlClientProvider } from 'next-intl';
 import { cookies, headers } from 'next/headers';
 
@@ -68,11 +69,13 @@ const RootLayout = async ({
       style={{ colorScheme: theme }}
     >
       <body>
-        <LobeUiProvider initialTheme={theme}>
-          <NextIntlClientProvider locale={locale} messages={messages}>
-            {children}
-          </NextIntlClientProvider>
-        </LobeUiProvider>
+        <AntdRegistry>
+          <LobeUiProvider initialTheme={theme}>
+            <NextIntlClientProvider locale={locale} messages={messages}>
+              {children}
+            </NextIntlClientProvider>
+          </LobeUiProvider>
+        </AntdRegistry>
       </body>
     </html>
   );

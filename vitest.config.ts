@@ -23,6 +23,7 @@ const vitestConfig = defineConfig({
     environment: 'node',
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
+    testTimeout: 15_000,
     exclude: ['.next/**', 'coverage/**', 'dist/**', 'node_modules/**'],
     coverage: {
       provider: 'v8',

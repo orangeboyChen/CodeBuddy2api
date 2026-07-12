@@ -63,16 +63,15 @@ textarea {
 }
 
 .admin-header {
-  --bg-color: color-mix(
-    in srgb,
-    var(--ant-color-bg-container) 72%,
-    transparent
-  );
+  --bg-color: color-mix(in srgb, var(--lobe-color-bg-layout) 72%, transparent);
 
+  position: sticky !important;
+  top: 0;
   z-index: 20;
   height: 56px;
   padding: 0 12px 0 24px !important;
-  border-bottom: 1px solid var(--ant-color-border) !important;
+  border-bottom: 1px solid var(--lobe-color-border) !important;
+  background-color: transparent !important;
   background-image: radial-gradient(
     transparent 1px,
     var(--bg-color) 1px
@@ -83,8 +82,7 @@ textarea {
 }
 
 .console-header {
-  position: sticky !important;
-  top: 0;
+  z-index: 30;
 }
 
 .admin-header-brand {
@@ -104,6 +102,10 @@ textarea {
 
 .admin-header-select > *:last-child {
   min-width: 116px;
+}
+
+.admin-header-mobile-menu {
+  display: none;
 }
 
 .console-logout {
@@ -132,7 +134,9 @@ textarea {
 }
 
 .dashboard-metric-card {
+  min-height: 176px;
   min-width: 0;
+  padding: 24px !important;
 }
 
 .dashboard-metric-card [id='credentialUsagePercent'] {
@@ -148,7 +152,7 @@ textarea {
 }
 
 .dashboard-metric-header {
-  min-height: 48px;
+  color: var(--color-secondary);
 }
 
 .dashboard-metric-card :is(#credentialTrend, #uptimeTrend, #apiCallsTrend) {
@@ -214,12 +218,10 @@ textarea {
 
 @media (max-width: 640px) {
   .admin-header {
-    display: grid !important;
-    gap: 8px;
-    height: auto;
+    display: flex !important;
+    height: 56px;
     min-height: 56px;
-    padding: 8px 12px !important;
-    grid-template-columns: minmax(0, 1fr);
+    padding: 0 12px !important;
   }
 
   .admin-header-brand {
@@ -228,10 +230,11 @@ textarea {
   }
 
   .admin-header-controls {
-    display: grid !important;
-    width: 100%;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
-    gap: 8px !important;
+    display: none !important;
+  }
+
+  .admin-header-mobile-menu {
+    display: block;
   }
 
   .console-main {
@@ -240,17 +243,6 @@ textarea {
 
   .dashboard-metric-grid {
     grid-template-columns: 1fr;
-  }
-
-  .admin-header-select {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    min-width: 0;
-  }
-
-  .admin-header-select > *:last-child {
-    min-width: 0;
-    width: 100%;
   }
 }
 

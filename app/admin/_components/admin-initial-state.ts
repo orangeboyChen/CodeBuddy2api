@@ -91,7 +91,10 @@ export const createDashboardState = (
     statusText: initialData.health.status === 'healthy' ? '运行中' : '不可用',
     totalApiCalls,
     totalCredentials: initialData.credentials.length,
-    uptimeText: initialData.health.uptimeText,
+    uptimeText:
+      initialData.health.uptimeText ||
+      initialData.health.checkedAtLabel ||
+      initialData.health.timestamp,
     validCredentials,
   };
 };

@@ -2,7 +2,7 @@
 
 import { startRegistration } from '@simplewebauthn/browser';
 import { Block, Button, Flexbox, Input } from '@lobehub/ui';
-import { ShieldCheck } from 'lucide-react';
+import { Save, ShieldCheck } from 'lucide-react';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 
@@ -331,7 +331,7 @@ const AdminAuthSettings = () => {
         </label>
         <div className="flex flex-wrap gap-3">
           <Button
-            icon={ShieldCheck}
+            icon={Save}
             onClick={() => void saveAccount()}
             htmlType="button"
           >

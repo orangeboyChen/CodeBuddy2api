@@ -13,19 +13,20 @@ import type {
   UsageState,
 } from '@/app/admin/_components/admin-store';
 import {
+  ActionIcon,
   Block,
   Button,
   Avatar,
   Checkbox,
   Flexbox,
   Input,
-  Select,
   Tag,
   TextArea,
 } from '@lobehub/ui';
-import { Switch, Tabs } from '@lobehub/ui/base-ui';
+import { Select, Switch, Tabs } from '@lobehub/ui/base-ui';
 import {
   BarChart3,
+  Bug,
   ChartLine,
   ChartNoAxesCombined,
   Check,
@@ -40,6 +41,7 @@ import {
   KeyRound,
   Layers3,
   Link,
+  LayoutDashboard,
   LoaderCircle,
   MousePointerClick,
   Pencil,
@@ -49,6 +51,7 @@ import {
   Save,
   Server,
   Send,
+  Settings2,
   Trash2,
   UserRound,
   WandSparkles,
@@ -153,6 +156,15 @@ const CHART_COLORS = [
   '#0891b2',
 ];
 
+const TAB_ICONS: Record<TabKey, LucideIcon> = {
+  'api-test': Send,
+  credentials: KeyRound,
+  dashboard: LayoutDashboard,
+  debug: Bug,
+  settings: Settings2,
+  usage: ChartLine,
+};
+
 const getLocalizedAdminText = (locale: AppLocale) => {
   return {
     'en-US': {
@@ -223,10 +235,9 @@ const getLocalizedAdminText = (locale: AppLocale) => {
         'When enabled, `/v1/responses` requests using this credential are sent upstream directly instead of being converted into Chat Completions.',
       credentialResponsesProxy:
         'Convert Responses requests to Chat Completions before sending upstream',
-      credentialRoleAsSystem:
-        'Convert the first developer message into a system message',
+      credentialRoleAsSystem: 'Normalize developer messages for upstream',
       credentialRoleAsSystemHelp:
-        'Only applies when this credential uses the Chat Completions proxy path.',
+        'Sends the first developer message as system and later developer messages as user.',
       credentialRoleKeepDeveloper:
         'Keep the developer role when converting to Chat Completions',
       credentialSave: 'Save credential',
@@ -380,9 +391,9 @@ const getLocalizedAdminText = (locale: AppLocale) => {
         '有効にすると、この認証情報で処理される `/v1/responses` リクエストは Chat Completions へ変換せず上流へ直接送信されます。',
       credentialResponsesProxy:
         'Responses リクエストを Chat Completions に変換してから上流へ送信',
-      credentialRoleAsSystem: '最初の developer メッセージを system に変換',
+      credentialRoleAsSystem: 'developer メッセージを上流向けに正規化',
       credentialRoleAsSystemHelp:
-        'この認証情報が Chat Completions のプロキシ経路を使う場合にのみ有効です。',
+        '先頭の developer メッセージは system、それ以降の developer メッセージは user として送信します。',
       credentialRoleKeepDeveloper:
         'Chat Completions 変換時に developer ロールを保持',
       credentialSave: '認証情報を保存',
@@ -533,9 +544,9 @@ const getLocalizedAdminText = (locale: AppLocale) => {
         '开启后，该凭证命中的 `/v1/responses` 请求将直接发送至上游，不再转换为 Chat Completions。',
       credentialResponsesProxy:
         'Responses 请求先转换为 Chat Completions 再发送至上游',
-      credentialRoleAsSystem: '将首条 developer 消息转换为 system',
+      credentialRoleAsSystem: '转换 developer 消息角色以兼容上游',
       credentialRoleAsSystemHelp:
-        '仅在该凭证通过 Chat Completions 代理链路转发时生效。',
+        '首条 developer 消息作为 system 发送，其余 developer 消息作为 user 发送。',
       credentialRoleKeepDeveloper:
         '转换为 Chat Completions 时保留 developer 角色',
       credentialSave: '保存凭证',
@@ -754,6 +765,68 @@ const SectionTitle = ({
   );
 };
 
+const getMonotoneLinePath = (points: Array<{ x: number; y: number }>) => {
+  if (!points.length) {
+    return '';
+  }
+
+  if (points.length === 1) {
+    return `M ${points[0].x} ${points[0].y}`;
+  }
+
+  const slopes = points.slice(1).map((point, index) => {
+    const previousPoint = points[index];
+
+    return (point.y - previousPoint.y) / (point.x - previousPoint.x);
+  });
+  const tangents = points.map((point, index) => {
+    if (index === 0) {
+      return slopes[0];
+    }
+
+    if (index === points.length - 1) {
+      return slopes.at(-1) ?? 0;
+    }
+
+    const previousSlope = slopes[index - 1];
+    const nextSlope = slopes[index];
+
+    if (
+      previousSlope === 0 ||
+      nextSlope === 0 ||
+      previousSlope * nextSlope < 0
+    ) {
+      return 0;
+    }
+
+    const previousDistance = point.x - points[index - 1].x;
+    const nextDistance = points[index + 1].x - point.x;
+    const previousWeight = 2 * nextDistance + previousDistance;
+    const nextWeight = nextDistance + 2 * previousDistance;
+
+    return (
+      (previousWeight + nextWeight) /
+      (previousWeight / previousSlope + nextWeight / nextSlope)
+    );
+  });
+  const segments = points.slice(1).map((point, index) => {
+    const previousPoint = points[index];
+    const horizontalDistance = point.x - previousPoint.x;
+    const firstControlPoint = {
+      x: previousPoint.x + horizontalDistance / 3,
+      y: previousPoint.y + (tangents[index] * horizontalDistance) / 3,
+    };
+    const secondControlPoint = {
+      x: point.x - horizontalDistance / 3,
+      y: point.y - (tangents[index + 1] * horizontalDistance) / 3,
+    };
+
+    return `C ${firstControlPoint.x} ${firstControlPoint.y}, ${secondControlPoint.x} ${secondControlPoint.y}, ${point.x} ${point.y}`;
+  });
+
+  return `M ${points[0].x} ${points[0].y} ${segments.join(' ')}`;
+};
+
 const renderUsageChart = ({
   chart,
   emptyLabel,
@@ -776,8 +849,8 @@ const renderUsageChart = ({
   title: string;
 }) => {
   const width = 760;
-  const height = 240;
-  const padding = { bottom: 34, left: 46, right: 16, top: 20 };
+  const height = 224;
+  const padding = { bottom: 30, left: 44, right: 16, top: 14 };
   const firstSeries = series[0];
   const labels = firstSeries?.points.map((point) => point.label) ?? [];
   const pointCount = labels.length;
@@ -800,54 +873,49 @@ const renderUsageChart = ({
     return padding.top + chartHeight - (value / maxValue) * chartHeight;
   };
 
+  const gridStepCount = Math.min(3, Math.max(1, Math.floor(maxValue)));
+  const gridValues = Array.from(
+    { length: gridStepCount },
+    (_, index) => (maxValue / gridStepCount) * (index + 1),
+  ).reverse();
+  const xLabelInterval = Math.max(1, Math.ceil((pointCount - 1) / 3));
+
   return (
     <Block direction="vertical" gap={16} padding={24} variant="outlined">
       <SectionTitle icon={ChartLine} title={title} />
       {series.length && pointCount ? (
-        <div className="relative">
-          <Flexbox className="mb-3" gap={12} wrap="wrap">
-            {series.map((item, seriesIndex) => {
-              const color = CHART_COLORS[seriesIndex % CHART_COLORS.length];
+        <div className="usage-chart relative">
+          <Flexbox className="mb-3" gap={6} wrap="wrap">
+            {series.map((item, index) => {
+              const color = CHART_COLORS[index % CHART_COLORS.length];
 
               return (
                 <Flexbox align="center" gap={6} horizontal key={item.model}>
                   <span
                     aria-hidden="true"
-                    className="h-2 w-2 rounded-full"
+                    className="h-0.5 w-4 rounded-full"
                     // eslint-disable-next-line react/forbid-dom-props
-                    style={{ background: color }}
+                    style={{ backgroundColor: color }}
                   />
-                  <span className="text-xs text-secondary">{item.model}</span>
+                  <span
+                    className="text-xs font-medium"
+                    // eslint-disable-next-line react/forbid-dom-props
+                    style={{ color }}
+                  >
+                    {item.model}
+                  </span>
                 </Flexbox>
               );
             })}
           </Flexbox>
           <svg
             aria-label={title}
-            className="w-full h-auto overflow-visible"
+            className="h-auto w-full overflow-visible"
+            role="img"
             viewBox={`0 0 ${width} ${height}`}
           >
-            <defs>
-              {series.map((item, seriesIndex) => {
-                const color = CHART_COLORS[seriesIndex % CHART_COLORS.length];
-
-                return (
-                  <linearGradient
-                    id={`${chart}-${item.model.replaceAll(/[^a-zA-Z0-9]/g, '-')}`}
-                    key={item.model}
-                    x1="0"
-                    x2="0"
-                    y1="0"
-                    y2="1"
-                  >
-                    <stop offset="0%" stopColor={color} stopOpacity="0.2" />
-                    <stop offset="100%" stopColor={color} stopOpacity="0" />
-                  </linearGradient>
-                );
-              })}
-            </defs>
-            {Array.from({ length: 4 }, (_, index) => {
-              const value = (maxValue / 4) * (index + 1);
+            <title>{title}</title>
+            {gridValues.map((value) => {
               const y = getY(value);
 
               return (
@@ -858,12 +926,11 @@ const renderUsageChart = ({
                     y1={y}
                     y2={y}
                     className="stroke-border-light dark:stroke-border-dark"
-                    strokeDasharray="4 6"
                   />
                   <text
                     x={padding.left - 10}
                     y={y + 4}
-                    className="fill-secondary text-[10px]"
+                    className="fill-secondary text-[9px]"
                     textAnchor="end"
                   >
                     {formatNumber(locale, Math.round(value))}
@@ -873,33 +940,20 @@ const renderUsageChart = ({
             })}
             {series.map((item, seriesIndex) => {
               const color = CHART_COLORS[seriesIndex % CHART_COLORS.length];
-              const path = item.points
-                .map((point, pointIndex) => {
-                  const x = getX(pointIndex);
-                  const y = getY(point[metric] ?? 0);
-                  return `${pointIndex === 0 ? 'M' : 'L'} ${x} ${y}`;
-                })
-                .join(' ');
-              const gradientId = `${chart}-${item.model.replaceAll(
-                /[^a-zA-Z0-9]/g,
-                '-',
-              )}`;
-              const areaPath = `${path} L ${getX(pointCount - 1)} ${padding.top + chartHeight} L ${getX(0)} ${padding.top + chartHeight} Z`;
-
+              const points = item.points.map((point, pointIndex) => ({
+                x: getX(pointIndex),
+                y: getY(point[metric] ?? 0),
+              }));
+              const path = getMonotoneLinePath(points);
               return (
                 <g key={item.model}>
-                  <path
-                    d={areaPath}
-                    fill={`url(#${gradientId})`}
-                    stroke="none"
-                  />
                   <path
                     d={path}
                     fill="none"
                     stroke={color}
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    strokeWidth="3"
+                    strokeWidth="2"
                   />
                   {item.points.map((point, pointIndex) => {
                     const value = point[metric] ?? 0;
@@ -912,7 +966,7 @@ const renderUsageChart = ({
                         cx={x}
                         cy={y}
                         fill={color}
-                        r="5"
+                        r="3"
                         tabIndex={0}
                         onBlur={() => {
                           onHoverPoint(null);
@@ -959,12 +1013,18 @@ const renderUsageChart = ({
                 key={`${title}-${label}`}
                 x={getX(index)}
                 y={height - 10}
-                className="fill-secondary text-[10px]"
-                textAnchor="middle"
+                className="fill-secondary text-[9px]"
+                textAnchor={
+                  index === 0
+                    ? 'start'
+                    : index === labels.length - 1
+                      ? 'end'
+                      : 'middle'
+                }
               >
                 {index === 0 ||
                 index === labels.length - 1 ||
-                index % Math.ceil(labels.length / 5) === 0
+                index % xLabelInterval === 0
                   ? label
                   : ''}
               </text>
@@ -1208,7 +1268,7 @@ const CredentialCard = ({
   const isEditing = form.editingIndex === credential.index;
 
   return (
-    <Block direction="vertical" gap={16} padding={20} variant="outlined">
+    <Block direction="vertical" gap={16} padding={24} variant="outlined">
       <div className="flex items-center gap-4">
         <Avatar avatar={avatarText || 'C'} size={48} />
         <div className="flex-1 min-w-0">
@@ -1236,7 +1296,7 @@ const CredentialCard = ({
               {formatDateTime(locale, credential.created_at)}
             </span>
           </div>
-          <Flexbox className="pt-2" gap={8} wrap="wrap">
+          <Flexbox gap={8} paddingBlock={8} wrap="wrap">
             <Tag>
               {credential.responses_passthrough
                 ? text.credentialResponsesDirect
@@ -1393,7 +1453,7 @@ const AccessKeyCard = ({
   const isBusy = actionId === accessKey.id;
 
   return (
-    <Block direction="vertical" gap={16} padding={20} variant="outlined">
+    <Block direction="vertical" gap={16} padding={24} variant="outlined">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2 mb-2">
@@ -1551,10 +1611,15 @@ export const TabNav = ({ activeTab, onChange }: TabNavProps) => {
     <Tabs
       activeKey={activeTab}
       className="console-tabs"
-      items={TAB_ITEMS.map((tab) => ({
-        key: tab.key,
-        label: translations(tab.key === 'api-test' ? 'apiTest' : tab.key),
-      }))}
+      items={TAB_ITEMS.map((tab) => {
+        const Icon = TAB_ICONS[tab.key];
+
+        return {
+          icon: <Icon aria-hidden="true" size={16} strokeWidth={2} />,
+          key: tab.key,
+          label: translations(tab.key === 'api-test' ? 'apiTest' : tab.key),
+        };
+      })}
       onChange={(key) => {
         onChange(key as TabKey);
       }}
@@ -1570,6 +1635,8 @@ export const DashboardSection = ({
 }: DashboardSectionProps) => {
   const locale = useLocale() as AppLocale;
   const text = getLocalizedAdminText(locale);
+  const uptimeText =
+    state.uptimeText || state.lastCheckedAt || text.dashboardRefreshPending;
 
   return (
     <Flexbox direction="vertical" gap={24} id="dashboard">
@@ -1578,10 +1645,15 @@ export const DashboardSection = ({
           className="dashboard-metric-card"
           direction="vertical"
           gap={12}
-          padding={20}
+          padding={24}
           variant="outlined"
         >
-          <Flexbox align="center" gap={8} horizontal>
+          <Flexbox
+            align="center"
+            className="dashboard-metric-header"
+            gap={8}
+            horizontal
+          >
             <KeyRound aria-hidden="true" size={18} strokeWidth={2} />
             <div className="dashboard-metric-label">
               {text.dashboardCredentials}
@@ -1634,10 +1706,15 @@ export const DashboardSection = ({
           className="dashboard-metric-card"
           direction="vertical"
           gap={12}
-          padding={20}
+          padding={24}
           variant="outlined"
         >
-          <Flexbox align="center" gap={8} horizontal>
+          <Flexbox
+            align="center"
+            className="dashboard-metric-header"
+            gap={8}
+            horizontal
+          >
             <Server
               aria-hidden="true"
               id="serviceStatusIcon"
@@ -1671,27 +1748,24 @@ export const DashboardSection = ({
           </Flexbox>
           <Flexbox align="center" gap={4} horizontal id="uptimeTrend">
             <Clock3 aria-hidden="true" size={14} strokeWidth={2} />
-            <span id="uptime">{state.uptimeText}</span>
+            <span aria-live="polite" id="uptime">
+              {uptimeText}
+            </span>
           </Flexbox>
         </Block>
         <Block
-          className="dashboard-metric-card dashboard-metric-card-clickable"
+          className="dashboard-metric-card"
           direction="vertical"
           gap={12}
-          onClick={onCopyEndpoint}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              onCopyEndpoint();
-            }
-          }}
-          padding={20}
-          role="button"
-          tabIndex={0}
-          title={text.apiEndpointTooltip}
+          padding={24}
           variant="outlined"
         >
-          <Flexbox align="center" gap={8} horizontal>
+          <Flexbox
+            align="center"
+            className="dashboard-metric-header"
+            gap={8}
+            horizontal
+          >
             <Link aria-hidden="true" size={18} strokeWidth={2} />
             <div className="dashboard-metric-label">
               {text.apiEndpointTitle}
@@ -1704,21 +1778,27 @@ export const DashboardSection = ({
             >
               {state.apiEndpoint || '-'}
             </div>
-            <Copy aria-hidden="true" size={16} strokeWidth={2} />
-          </Flexbox>
-          <Flexbox align="center" gap={4} horizontal>
-            <Info aria-hidden="true" size={14} strokeWidth={2} />
-            {text.copyLinkHint}
+            <ActionIcon
+              aria-label={text.copyLink}
+              icon={Copy}
+              onClick={onCopyEndpoint}
+              title={text.copyLink}
+            />
           </Flexbox>
         </Block>
         <Block
           className="dashboard-metric-card"
           direction="vertical"
           gap={12}
-          padding={20}
+          padding={24}
           variant="outlined"
         >
-          <Flexbox align="center" gap={8} horizontal>
+          <Flexbox
+            align="center"
+            className="dashboard-metric-header"
+            gap={8}
+            horizontal
+          >
             <ChartNoAxesCombined aria-hidden="true" size={18} strokeWidth={2} />
             <div className="dashboard-metric-label">
               {text.dashboardApiCalls}
@@ -1731,17 +1811,17 @@ export const DashboardSection = ({
             >
               {state.totalApiCalls}
             </div>
-            <div className="relative h-12 w-12" id="totalUsageRing">
-              <svg height="48" width="48">
+            <div className="relative h-14 w-14 shrink-0" id="totalUsageRing">
+              <svg height="56" width="56">
                 <circle
-                  cx="24"
-                  cy="24"
+                  cx="28"
+                  cy="28"
                   r="20"
                   className="fill-none stroke-border-light dark:stroke-border-dark stroke-4"
                 />
                 <circle
-                  cx="24"
-                  cy="24"
+                  cx="28"
+                  cy="28"
                   r="20"
                   className="fill-none stroke-primary stroke-4 transition-all"
                   id="usageRingProgress"
@@ -1955,12 +2035,20 @@ export const UsageSection = ({
             </label>
           </div>
           <div className="flex flex-wrap gap-3">
-            <Button onClick={onRefresh} htmlType="button" type="primary">
-              {state.loading ? <LoaderCircle /> : <RefreshCw />}
+            <Button
+              htmlType="button"
+              icon={state.loading ? LoaderCircle : RefreshCw}
+              onClick={onRefresh}
+              type="primary"
+            >
               {text.usageRefresh}
             </Button>
-            <Button onClick={onClearHistory} danger htmlType="button">
-              <Trash2 />
+            <Button
+              danger
+              htmlType="button"
+              icon={Trash2}
+              onClick={onClearHistory}
+            >
               {text.usageClearHistory}
             </Button>
           </div>
@@ -2033,16 +2121,16 @@ export const UsageSection = ({
           <table className="w-full border-collapse mt-4">
             <thead>
               <tr>
-                <th className="p-3 px-4 text-left font-semibold bg-bg-light dark:bg-bg-dark border-b border-border-light dark:border-border-dark">
+                <th className="p-3 px-4 text-left font-semibold border-b border-border-light dark:border-border-dark">
                   {text.usageModel}
                 </th>
-                <th className="p-3 px-4 text-right font-semibold bg-bg-light dark:bg-bg-dark border-b border-border-light dark:border-border-dark">
+                <th className="p-3 px-4 text-right font-semibold border-b border-border-light dark:border-border-dark">
                   {text.usageTableCalls}
                 </th>
-                <th className="p-3 px-4 text-right font-semibold bg-bg-light dark:bg-bg-dark border-b border-border-light dark:border-border-dark">
+                <th className="p-3 px-4 text-right font-semibold border-b border-border-light dark:border-border-dark">
                   {text.usageTableTokens}
                 </th>
-                <th className="p-3 px-4 text-right font-semibold bg-bg-light dark:bg-bg-dark border-b border-border-light dark:border-border-dark">
+                <th className="p-3 px-4 text-right font-semibold border-b border-border-light dark:border-border-dark">
                   {text.usageTableCacheHit}
                 </th>
               </tr>
@@ -2527,10 +2615,14 @@ export const ApiTestSection = ({
           />
         </div>
         <Flexbox align="center" className="mb-4" gap={8} horizontal>
-          <label className="font-medium text-text-light dark:text-text-dark">
-            <Checkbox checked={state.stream} onChange={onStreamChange} />
-          </label>
-          <span>{text.apiTestStream}</span>
+          <span className="font-medium text-text-light dark:text-text-dark">
+            {text.apiTestStream}
+          </span>
+          <Switch
+            aria-label={text.apiTestStream}
+            checked={state.stream}
+            onChange={onStreamChange}
+          />
         </Flexbox>
         <Flexbox horizontal>
           <Button
