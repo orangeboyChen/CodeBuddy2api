@@ -10,6 +10,13 @@ import { resolvedThemeCookieName, themeCookieName } from '@/lib/theme';
 import { getJsonBody } from '@/lib/server/shared/http';
 
 const maxAge = 60 * 60 * 24 * 365;
+const cookieOptions = {
+  httpOnly: true,
+  maxAge,
+  path: '/',
+  sameSite: 'lax' as const,
+  secure: true,
+};
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -35,20 +42,19 @@ export const POST = async (request: Request): Promise<Response> => {
       );
     }
 
-    response.cookies.set(localePreferenceCookieName, localePreference, {
-      maxAge,
-      path: '/',
-      sameSite: 'lax',
-    });
+    response.cookies.set(
+      localePreferenceCookieName,
+      localePreference,
+      cookieOptions,
+    );
 
     if (localePreference === systemLocalePreference) {
-      response.cookies.delete(localeCookieName);
-    } else {
-      response.cookies.set(localeCookieName, localePreference, {
-        maxAge,
-        path: '/',
-        sameSite: 'lax',
+      response.cookies.set(localeCookieName, '', {
+        ...cookieOptions,
+        maxAge: 0,
       });
+    } else {
+      response.cookies.set(localeCookieName, localePreference, cookieOptions);
     }
   }
 
@@ -60,18 +66,14 @@ export const POST = async (request: Request): Promise<Response> => {
       );
     }
 
-    response.cookies.set(themeCookieName, body.theme, {
-      maxAge,
-      path: '/',
-      sameSite: 'lax',
-    });
+    response.cookies.set(themeCookieName, body.theme, cookieOptions);
 
     if (body.resolvedTheme === 'dark' || body.resolvedTheme === 'light') {
-      response.cookies.set(resolvedThemeCookieName, body.resolvedTheme, {
-        maxAge,
-        path: '/',
-        sameSite: 'lax',
-      });
+      response.cookies.set(
+        resolvedThemeCookieName,
+        body.resolvedTheme,
+        cookieOptions,
+      );
     }
   }
 

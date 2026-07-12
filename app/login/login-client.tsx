@@ -10,7 +10,7 @@ import { useAtom } from 'jotai';
 import { useHydrateAtoms } from 'jotai/utils';
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 
-import { themeAtom } from '@/lib/client/console';
+import { themeAtom } from '@/app/page-state';
 import { AdminHeader } from '@/app/header';
 import type { AdminLoginMessages } from '@/lib/i18n/messages';
 import {
@@ -273,6 +273,7 @@ const LoginClient = ({
       align="center"
     >
       <AdminHeader
+        brand="CodeBuddy2API"
         className="login-header"
         localePreference={localePreference}
         onLocaleChange={changeLocale}

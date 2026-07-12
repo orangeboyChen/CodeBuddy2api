@@ -3,13 +3,13 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
 
-import AdminPageLayout from '@/app/dashboard/console-layout';
-import type { AdminConsoleInitialData } from '@/lib/client/console';
+import AdminPageLayout from '@/app/page-shell';
+import type { AdminConsoleInitialData } from '@/app/page-data';
 import type {
   AccessKeySummary,
   CredentialSummary,
-  TabKey,
-} from '@/lib/client/console';
+} from '@/app/credentials/credentials';
+import type { TabKey } from '@/app/page-data';
 import { listAccessKeys } from '@/lib/server/domain/access-keys';
 import {
   getAdminSessionSummary,
@@ -129,11 +129,9 @@ export const AdminPage = async ({
     headers: cookieHeader ? { cookie: cookieHeader } : {},
   });
   const session = await getAdminSessionSummary(request);
+  const sessionAuthenticated = await isAdminSessionAuthenticated(request);
 
-  if (
-    session.accountConfigured &&
-    !(await isAdminSessionAuthenticated(request))
-  ) {
+  if (session.accountConfigured && !sessionAuthenticated) {
     redirect('/login');
   }
 
@@ -151,6 +149,7 @@ export const AdminPage = async ({
     <AdminPageLayout
       initialData={await getInitialData(locale)}
       initialLocalePreference={localePreference}
+      showLogout={sessionAuthenticated}
       initialTab={initialTab}
       initialTheme={parseThemeMode(cookieStore.get(themeCookieName)?.value)}
     >

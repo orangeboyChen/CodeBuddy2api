@@ -6,7 +6,7 @@ import { motion } from 'motion/react';
 import { NextIntlClientProvider } from 'next-intl';
 
 import Dashboard from '@/app/dashboard/dashboard';
-import { DashboardTabProvider } from '@/lib/client/console';
+import { DashboardProvider } from '@/app/dashboard/dashboard';
 import { getMessages } from '@/lib/i18n/messages';
 
 const renderWithMessages = (children: React.ReactNode) => {
@@ -22,7 +22,7 @@ const renderWithMessages = (children: React.ReactNode) => {
 describe('dashboard view', () => {
   it('keeps all four dashboard cards visible', () => {
     renderWithMessages(
-      <DashboardTabProvider
+      <DashboardProvider
         value={{
           dashboard: {
             apiEndpoint: 'http://localhost:8001/v1',
@@ -43,18 +43,18 @@ describe('dashboard view', () => {
         }}
       >
         <Dashboard />
-      </DashboardTabProvider>,
+      </DashboardProvider>,
     );
 
     expect(screen.getAllByText('2').length).toBeGreaterThan(0);
     expect(screen.getByText('http://localhost:8001/v1')).toBeVisible();
-    expect(screen.getByText('42')).toBeVisible();
+    expect(document.getElementById('totalApiCalls')).toHaveTextContent('42');
     expect(document.querySelectorAll('.dashboard-metric-card')).toHaveLength(4);
   });
 
   it('keeps the initial service status time visible', () => {
     renderWithMessages(
-      <DashboardTabProvider
+      <DashboardProvider
         value={{
           dashboard: {
             apiEndpoint: 'http://localhost:8001/v1',
@@ -75,7 +75,7 @@ describe('dashboard view', () => {
         }}
       >
         <Dashboard />
-      </DashboardTabProvider>,
+      </DashboardProvider>,
     );
 
     expect(

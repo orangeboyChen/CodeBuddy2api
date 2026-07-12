@@ -18,50 +18,54 @@ import {
   Settings2,
 } from 'lucide-react';
 
+import type { AdminConsoleInitialData } from '@/app/page-data';
 import {
-  createApiTestState,
-  createCredentialsState,
-  createDebugState,
   createDashboardState,
-  createSettingsState,
-  createUsageState,
-  type AdminConsoleInitialData,
-} from '@/lib/client/console';
-import {
-  ApiTestTabProvider,
-  CredentialsTabProvider,
-  DashboardTabProvider,
-  DebugTabProvider,
-  SettingsTabProvider,
-  UsageTabProvider,
-} from '@/lib/client/console';
-import {
-  adminSessionAtom,
-  apiTestStateAtom,
-  authStateAtom,
-  type AccessKeySummary,
-  type CredentialSummary,
-  credentialsStateAtom,
-  debugStateAtom,
   dashboardStateAtom,
-  DEFAULT_TEST_MODELS,
-  defaultApiTestState,
-  defaultAuthState,
-  defaultCredentialsState,
-  defaultDebugState,
+  DashboardProvider,
   defaultDashboardState,
+} from '@/app/dashboard/dashboard';
+import {
+  createDebugState,
+  debugStateAtom,
+  defaultDebugState,
+  DebugProvider,
+  type DebugLogEntry,
+} from '@/app/debug/debug';
+import {
+  createSettingsState,
   defaultSettingsState,
-  defaultUsageState,
-  type TabKey,
+  SettingsProvider,
   settingsStateAtom,
-  themeAtom,
-  type ThemeMode,
+} from '@/app/settings/settings';
+import {
+  createUsageState,
+  defaultUsageState,
   type UsageChartSeries,
   type UsageFilterOption,
   type UsageFiltersState,
   type UsageRange,
+  UsageProvider,
   usageStateAtom,
-} from '@/lib/client/console';
+} from '@/app/usage/usage';
+import {
+  ApiTestProvider,
+  apiTestStateAtom,
+  createApiTestState,
+  defaultApiTestState,
+} from '@/app/api-test/api-test';
+import {
+  authStateAtom,
+  createCredentialsState,
+  CredentialsProvider,
+  credentialsStateAtom,
+  defaultAuthState,
+  defaultCredentialsState,
+  type AccessKeySummary,
+  type CredentialSummary,
+} from '@/app/credentials/credentials';
+import { type TabKey } from '@/app/page-data';
+import { themeAtom, type ThemeMode } from '@/app/page-state';
 import { AdminHeader } from '@/app/header';
 import { themeChangeEventName } from '@/lib/theme';
 import { type LocalePreference } from '@/lib/i18n/routing';
@@ -70,23 +74,19 @@ import {
   saveThemePreference,
 } from '@/lib/client/preferences';
 
-const tabIcons = {
-  'api-test': Send,
-  credentials: KeyRound,
-  dashboard: LayoutDashboard,
-  debug: Bug,
-  settings: Settings2,
-  usage: ChartLine,
-};
-
-const tabLabelKeys = {
-  'api-test': 'apiTest',
-  credentials: 'credentials',
-  dashboard: 'dashboard',
-  debug: 'debug',
-  settings: 'settings',
-  usage: 'usage',
-} as const;
+const tabs: Array<{
+  icon: typeof LayoutDashboard;
+  key: TabKey;
+  labelKey:
+    'apiTest' | 'credentials' | 'dashboard' | 'debug' | 'settings' | 'usage';
+}> = [
+  { icon: LayoutDashboard, key: 'dashboard', labelKey: 'dashboard' },
+  { icon: ChartLine, key: 'usage', labelKey: 'usage' },
+  { icon: KeyRound, key: 'credentials', labelKey: 'credentials' },
+  { icon: Send, key: 'api-test', labelKey: 'apiTest' },
+  { icon: Bug, key: 'debug', labelKey: 'debug' },
+  { icon: Settings2, key: 'settings', labelKey: 'settings' },
+];
 
 interface HealthResponse {
   status?: string;
@@ -168,9 +168,7 @@ interface SettingsResponse {
 interface DebugResponse {
   autoRefreshSeconds?: number;
   enabled?: boolean;
-  items?: Array<
-    typeof defaultDebugState.items extends Array<infer Item> ? Item : never
-  >;
+  items?: DebugLogEntry[];
   maxEntries?: number;
   message?: string;
 }
@@ -291,6 +289,7 @@ interface AdminPageLayoutProps {
   initialLocalePreference: LocalePreference;
   initialTab: TabKey;
   initialTheme?: ThemeMode;
+  showLogout: boolean;
 }
 
 const AdminPageLayoutContent = ({
@@ -299,6 +298,7 @@ const AdminPageLayoutContent = ({
   initialLocalePreference,
   initialTab,
   initialTheme = 'system',
+  showLogout,
 }: AdminPageLayoutProps) => {
   const router = useRouter();
   const initialDashboardState = initialData
@@ -339,7 +339,6 @@ const AdminPageLayoutContent = ({
   const [auth, setAuth] = useAtom(authStateAtom);
   const [apiTest, setApiTest] = useAtom(apiTestStateAtom);
   const [settings, setSettings] = useAtom(settingsStateAtom);
-  const [adminSession, setAdminSession] = useAtom(adminSessionAtom);
   const activeTab = initialTab;
   const locale = useLocale();
   const translations = useTranslations('Admin');
@@ -1185,7 +1184,7 @@ const AdminPageLayoutContent = ({
         model:
           apiTest.model ||
           getConfiguredModels(settings.values.CODEBUDDY_MODELS)[0] ||
-          DEFAULT_TEST_MODELS[0],
+          'glm-5.1',
         stream: apiTest.stream,
       }),
       headers: {
@@ -1450,19 +1449,6 @@ const AdminPageLayoutContent = ({
   ]);
 
   useEffect(() => {
-    void fetch('/admin-api/auth/session')
-      .then(async (response) => {
-        const payload = (await response.json()) as {
-          session?: { authenticated: boolean };
-        };
-        setAdminSession(payload.session ?? null);
-      })
-      .catch(() => {
-        setAdminSession(null);
-      });
-  }, [setAdminSession]);
-
-  useEffect(() => {
     const applyTheme = () => {
       const isDark =
         theme === 'dark' ||
@@ -1555,7 +1541,7 @@ const AdminPageLayoutContent = ({
       <div id="dashboardPage" className="console-workspace">
         <AdminHeader
           action={
-            adminSession?.authenticated ? (
+            showLogout ? (
               <Button
                 className="console-logout"
                 htmlType="button"
@@ -1577,9 +1563,8 @@ const AdminPageLayoutContent = ({
             activeKey={activeTab}
             className="console-tabs"
             classNames={{ indicator: 'console-tabs-indicator' }}
-            items={Object.entries(tabLabelKeys).map(([key, labelKey]) => {
-              const tab = key as TabKey;
-              const Icon = tabIcons[tab];
+            items={tabs.map(({ icon: Icon, key, labelKey }) => {
+              const tab = key;
 
               return {
                 icon: <Icon aria-hidden="true" size={16} strokeWidth={2} />,
@@ -1593,7 +1578,7 @@ const AdminPageLayoutContent = ({
             variant="square"
           />
           {activeTab === 'dashboard' ? (
-            <DashboardTabProvider
+            <DashboardProvider
               value={{
                 dashboard,
                 onCopyEndpoint: () => {
@@ -1608,10 +1593,10 @@ const AdminPageLayoutContent = ({
               }}
             >
               {children}
-            </DashboardTabProvider>
+            </DashboardProvider>
           ) : null}
           {activeTab === 'credentials' ? (
-            <CredentialsTabProvider
+            <CredentialsProvider
               value={{
                 auth,
                 credentials,
@@ -1628,7 +1613,7 @@ const AdminPageLayoutContent = ({
                   }));
                 },
                 onCopyAuthUrl: () => {
-                  void copyText(auth.authUrl, '认证链接已复制。');
+                  void copyText(auth.authUrl, consoleMessages.authCopy);
                 },
                 onCredentialFirstMessageRoleToSystemChange: (value) => {
                   setCredentials((current) => ({
@@ -1794,10 +1779,10 @@ const AdminPageLayoutContent = ({
               }}
             >
               {children}
-            </CredentialsTabProvider>
+            </CredentialsProvider>
           ) : null}
           {activeTab === 'usage' ? (
-            <UsageTabProvider
+            <UsageProvider
               value={{
                 onAccessKeyChange: (value) => {
                   void loadUsage({ accessKey: value });
@@ -1828,10 +1813,10 @@ const AdminPageLayoutContent = ({
               }}
             >
               {children}
-            </UsageTabProvider>
+            </UsageProvider>
           ) : null}
           {activeTab === 'api-test' ? (
-            <ApiTestTabProvider
+            <ApiTestProvider
               value={{
                 apiTest,
                 credentialOptions: credentials.items.filter(
@@ -1862,10 +1847,10 @@ const AdminPageLayoutContent = ({
               }}
             >
               {children}
-            </ApiTestTabProvider>
+            </ApiTestProvider>
           ) : null}
           {activeTab === 'debug' ? (
-            <DebugTabProvider
+            <DebugProvider
               value={{
                 autoRefreshOptions: [...debugAutoRefreshOptions],
                 debug,
@@ -1899,10 +1884,10 @@ const AdminPageLayoutContent = ({
               }}
             >
               {children}
-            </DebugTabProvider>
+            </DebugProvider>
           ) : null}
           {activeTab === 'settings' ? (
-            <SettingsTabProvider
+            <SettingsProvider
               value={{
                 onChange: (key, value) => {
                   setSettings((current) => ({
@@ -1917,7 +1902,7 @@ const AdminPageLayoutContent = ({
               }}
             >
               {children}
-            </SettingsTabProvider>
+            </SettingsProvider>
           ) : null}
         </main>
       </div>

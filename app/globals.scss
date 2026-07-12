@@ -138,32 +138,43 @@ textarea {
   color: var(--lobe-color-text);
 }
 
-.console-header {
+.admin-header {
   --border-color: var(--lobe-color-border);
   --bg-color: color-mix(in srgb, var(--lobe-color-bg-layout) 72%, transparent);
+  --header-height: 56px;
 
-  position: sticky !important;
-  top: 0;
-  z-index: 20;
-  height: 56px;
-  padding: 0 12px 0 24px !important;
-  border-radius: 0 !important;
+  position: relative !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   border-bottom: 1px solid var(--border-color) !important;
+  border-radius: 0 !important;
+  height: var(--header-height) !important;
+  padding: 0 12px 0 24px !important;
   background-color: transparent !important;
   background-image: radial-gradient(
     transparent 1px,
     var(--bg-color) 1px
   ) !important;
-  background-size: 4px 4px;
+  background-size: 4px 4px !important;
   backdrop-filter: saturate(50%) blur(4px) !important;
   -webkit-backdrop-filter: saturate(50%) blur(4px) !important;
+  top: 0 !important;
 }
 
 .console-header {
+  position: sticky !important;
+  top: 0;
   z-index: 30;
 }
 
-.console-header-brand {
+@supports (backdrop-filter: blur(1px)) {
+  .admin-header {
+    backdrop-filter: saturate(50%) blur(4px) !important;
+  }
+}
+
+.admin-header-brand {
   margin: 0;
   font-family: var(--font-sans);
   font-size: 16px;
@@ -171,18 +182,18 @@ textarea {
   letter-spacing: -0.01em;
 }
 
-.console-header-select {
+.admin-header-select {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   color: var(--color-secondary);
 }
 
-.console-header-select > *:last-child {
+.admin-header-select > *:last-child {
   min-width: 116px;
 }
 
-.console-header-mobile-menu {
+.admin-header-mobile-menu {
   display: none;
 }
 
@@ -348,14 +359,14 @@ textarea {
 }
 
 @media (max-width: 640px) {
-  .console-header {
+  .admin-header {
     display: flex !important;
     height: 56px;
     min-height: 56px;
     padding: 0 12px !important;
   }
 
-  .console-header-brand {
+  .admin-header-brand {
     flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
@@ -363,11 +374,11 @@ textarea {
     white-space: nowrap;
   }
 
-  .console-header-controls {
+  .admin-header-controls {
     display: none !important;
   }
 
-  .console-header-mobile-menu {
+  .admin-header-mobile-menu {
     display: block;
     flex: 0 0 auto;
   }

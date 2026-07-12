@@ -2,12 +2,61 @@
 
 import { Block, Flexbox, Input, TextArea } from '@lobehub/ui';
 import { Button, Select } from '@lobehub/ui/base-ui';
+import { atom } from 'jotai';
 import { LoaderCircle, Save, Server } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-
-import { useSettingsTab } from '@/lib/client/console';
+import { createContext, useContext } from 'react';
 
 import Security from './security';
+
+export type SettingsValue = string | number | null;
+
+export interface SettingsState {
+  labels: Record<string, string>;
+  loading: boolean;
+  saving: boolean;
+  values: Record<string, SettingsValue>;
+}
+
+export const defaultSettingsState: SettingsState = {
+  labels: {},
+  loading: true,
+  saving: false,
+  values: {},
+};
+
+export const settingsStateAtom = atom<SettingsState>(defaultSettingsState);
+
+export const createSettingsState = ({
+  settings,
+}: {
+  settings: {
+    labels: Record<string, string>;
+    values: Record<string, SettingsValue>;
+  };
+}): SettingsState => {
+  return {
+    labels: settings.labels,
+    loading: false,
+    saving: false,
+    values: settings.values,
+  };
+};
+
+export interface SettingsController {
+  onChange: (key: string, value: string) => void;
+  onSave: () => void;
+  settings: SettingsState;
+}
+
+const SettingsContext = createContext<SettingsController | null>(null);
+export const SettingsProvider = SettingsContext.Provider;
+
+const useSettings = (): SettingsController => {
+  const controller = useContext(SettingsContext);
+  if (!controller) throw new Error('Settings controller is unavailable');
+  return controller;
+};
 
 const settingsSelectOptions: Record<
   string,
@@ -33,19 +82,26 @@ const settingsSelectOptions: Record<
 const SettingField = ({
   label,
   onChange,
+  placeholder,
   settingKey,
   value,
 }: {
   label: string;
   onChange: (value: string) => void;
+  placeholder?: string;
   settingKey: string;
   value: string;
 }) => {
   const selectOptions = settingsSelectOptions[settingKey];
 
   return (
-    <label className="grid gap-2 text-sm text-text-light dark:text-text-dark">
-      <span className="font-medium">{label}</span>
+    <div className="mb-4">
+      <label
+        className="mb-2 block whitespace-normal break-words font-medium text-text-light dark:text-text-dark"
+        htmlFor={settingKey}
+      >
+        {label}
+      </label>
       {selectOptions ? (
         <Select
           className="w-full"
@@ -65,61 +121,54 @@ const SettingField = ({
         <Input
           id={settingKey}
           onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
           type="text"
           value={value}
         />
       )}
-    </label>
+    </div>
   );
 };
 
 const Settings = () => {
-  const { onChange, onSave, settings } = useSettingsTab();
+  const { onChange, onSave, settings } = useSettings();
   const translations = useTranslations('Admin');
 
   return (
-    <div className="grid gap-6" id="settings">
+    <div className="block" id="settings">
       <Block direction="vertical" gap={16} padding={24} variant="outlined">
         <Flexbox align="center" gap={8} horizontal>
-          <Server aria-hidden="true" size={18} strokeWidth={2} />
-          <h2 className="section-title">
+          <Server size={18} strokeWidth={2} />
+          <h3 className="section-title">
             {translations('settingsPanel.title')}
-          </h2>
+          </h3>
         </Flexbox>
-        <p className="text-sm text-secondary">
-          {translations('settingsPanel.helper')}
-        </p>
-        {settings.loading ? (
-          <Flexbox
-            align="center"
-            className="py-8 text-secondary"
-            direction="vertical"
-            gap={8}
-          >
-            <LoaderCircle
-              aria-hidden="true"
-              className="animate-spin"
-              size={20}
-            />
-            <span>{translations('settingsPanel.loading')}</span>
-          </Flexbox>
-        ) : (
-          <div className="grid gap-4">
-            {Object.entries(settings.labels).map(([settingKey, label]) => (
+        <div id="settingsForm">
+          {settings.loading ? (
+            <div className="py-8 text-center text-secondary">
+              <LoaderCircle />
+              <div>{translations('settingsPanel.loading')}</div>
+            </div>
+          ) : (
+            Object.entries(settings.labels).map(([settingKey, label]) => (
               <SettingField
                 key={settingKey}
                 label={label}
                 onChange={(value) => onChange(settingKey, value)}
+                placeholder={
+                  settingKey === 'CODEBUDDY_ADMIN_PASSKEY_RP_ID'
+                    ? translations('settingsPanel.passkeyRpIdPlaceholder')
+                    : undefined
+                }
                 settingKey={settingKey}
                 value={String(settings.values[settingKey] ?? '')}
               />
-            ))}
-          </div>
-        )}
+            ))
+          )}
+        </div>
         <Flexbox horizontal>
           <Button
             disabled={settings.saving}
-            htmlType="button"
             icon={Save}
             loading={settings.saving}
             onClick={onSave}
