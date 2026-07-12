@@ -5,10 +5,11 @@ import path from 'node:path';
 import {
   type DatabaseStorageAdapter,
   DrizzlePgDatabaseStorageAdapter,
-  type StorageEvent,
-} from './database';
+} from './backends/postgres';
+import { DrizzleSqliteDatabaseStorageAdapter } from './backends/sqlite';
+import type { StorageEvent } from './backends/types';
 
-export type StorageBackendKind = 'file' | 'pg';
+export type StorageBackendKind = 'file' | 'pg' | 'sqlite';
 
 interface JsonDocument<T> {
   key: string;
@@ -32,7 +33,6 @@ interface StorageBackend {
   listJson<T>(namespace: string): Promise<Array<JsonDocument<T>>>;
   listDebugLogs?(limit: number): Promise<StorageEvent[]>;
   listUsageEvents?(since: Date): Promise<StorageEvent[]>;
-  migrate?(): Promise<void>;
   putJson<T>(namespace: string, key: string, value: T): Promise<void>;
   trimDebugLogs?(maxEntries: number): Promise<void>;
   trimUsageEvents?(before: Date): Promise<void>;
@@ -50,7 +50,7 @@ interface StorageRuntime {
 
 const STORAGE_KIND_ENV = 'CODEBUDDY_STORAGE_BACKEND';
 const STORAGE_PG_URL_ENV = 'CODEBUDDY_STORAGE_PG_URL';
-const STORAGE_PG_SCHEMA_ENV = 'CODEBUDDY_STORAGE_PG_SCHEMA';
+const STORAGE_SQLITE_PATH_ENV = 'CODEBUDDY_STORAGE_SQLITE_PATH';
 const STORAGE_IMPORT_ENV = 'CODEBUDDY_STORAGE_IMPORT_LEGACY_FILES';
 const STORAGE_ENCRYPTION_KEY_ENV = 'CODEBUDDY_STORAGE_ENCRYPTION_KEY';
 const STORAGE_PERSISTENCE_ENV = 'CODEBUDDY_STORAGE_PERSISTENCE';
@@ -67,21 +67,16 @@ const resolveFileStorageDir = (): string => {
   const explicitDir = process.env[STORAGE_FILE_DIR_ENV]?.trim();
 
   if (explicitDir) {
-    return path.resolve(/* turbopackIgnore: true */ process.cwd(), explicitDir);
+    return path.resolve('.', explicitDir);
   }
 
   const legacyConfigPath = process.env[LEGACY_CONFIG_PATH_ENV]?.trim();
 
   if (legacyConfigPath) {
-    return path.dirname(
-      path.resolve(/* turbopackIgnore: true */ process.cwd(), legacyConfigPath),
-    );
+    return path.dirname(path.resolve('.', legacyConfigPath));
   }
 
-  return path.resolve(
-    /* turbopackIgnore: true */ process.cwd(),
-    '.codebuddy_data',
-  );
+  return path.resolve('.', '.codebuddy_data');
 };
 
 const getLegacyConfigPath = (): string | null => {
@@ -91,10 +86,7 @@ const getLegacyConfigPath = (): string | null => {
     return null;
   }
 
-  return path.resolve(
-    /* turbopackIgnore: true */ process.cwd(),
-    legacyConfigPath,
-  );
+  return path.resolve('.', legacyConfigPath);
 };
 
 export const getFileStorageDir = (): string => {
@@ -112,10 +104,7 @@ export const getConfigDir = (): string => {
 };
 
 export const getCredsDir = (): string => {
-  return path.resolve(
-    /* turbopackIgnore: true */ process.cwd(),
-    '.codebuddy_creds',
-  );
+  return path.resolve('.', '.codebuddy_creds');
 };
 
 const getStorageBackendKind = (): StorageBackendKind => {
@@ -130,6 +119,10 @@ const getStorageBackendKind = (): StorageBackendKind => {
     return 'file';
   }
 
+  if (value === 'sqlite' || persistence === 'sqlite') {
+    return 'sqlite';
+  }
+
   if (value === 'pg' || persistence === 'pg') {
     return 'pg';
   }
@@ -141,14 +134,18 @@ const getStorageBackendKind = (): StorageBackendKind => {
   return 'file';
 };
 
-const getPgSchema = (): string => {
-  const raw = process.env[STORAGE_PG_SCHEMA_ENV]?.trim();
+const getSqlitePath = (): string => {
+  const explicitPath = process.env[STORAGE_SQLITE_PATH_ENV]?.trim();
 
-  if (!raw) {
-    return 'codebuddy2api';
+  if (explicitPath) {
+    return path.resolve('.', explicitPath);
   }
 
-  return raw.replace(/[^a-zA-Z0-9_]/g, '_') || 'codebuddy2api';
+  return path.join(resolveFileStorageDir(), 'storage.sqlite');
+};
+
+const getPgSchema = (): string => {
+  return 'codebuddy2api';
 };
 
 const shouldImportLegacyFiles = (): boolean => {
@@ -283,13 +280,8 @@ const getLegacyDocumentPath = (
 ): string | null => {
   const legacyConfigPath = process.env[LEGACY_CONFIG_PATH_ENV]?.trim();
   const legacyConfigDir = legacyConfigPath
-    ? path.dirname(
-        path.resolve(
-          /* turbopackIgnore: true */ process.cwd(),
-          legacyConfigPath,
-        ),
-      )
-    : path.resolve(/* turbopackIgnore: true */ process.cwd(), 'config');
+    ? path.dirname(path.resolve('.', legacyConfigPath))
+    : path.resolve('.', 'config');
   const legacyFilename =
     namespace === 'config' && key === 'runtime'
       ? 'config.json'
@@ -344,12 +336,18 @@ const readFileStorageDocument = <T>(
 };
 
 const listCredentialFiles = (): string[] => {
-  if (!fs.existsSync(getCredsDir())) {
+  const credentialsDirectory = getCredsDir();
+
+  if (!fs.existsSync(credentialsDirectory)) {
     return [];
   }
 
+  if (!fs.statSync(credentialsDirectory).isDirectory()) {
+    throw new Error(`${credentialsDirectory} must be a directory`);
+  }
+
   return fs
-    .readdirSync(getCredsDir())
+    .readdirSync(credentialsDirectory)
     .filter(
       (item) =>
         item.endsWith('.json') && item !== CREDENTIAL_MANAGER_STATE_FILENAME,
@@ -419,7 +417,16 @@ const decryptPayload = <T>(ciphertext: string, mode: string): T => {
 };
 
 class FileStorageBackend implements StorageBackend {
-  public async initialize(): Promise<void> {}
+  public async initialize(): Promise<void> {
+    const credentialsDirectory = getCredsDir();
+
+    if (
+      fs.existsSync(credentialsDirectory) &&
+      !fs.statSync(credentialsDirectory).isDirectory()
+    ) {
+      throw new Error(`${credentialsDirectory} must be a directory`);
+    }
+  }
 
   public async getJson<T>(namespace: string, key: string): Promise<T | null> {
     return readFileStorageDocument<T>(namespace, key).value;
@@ -477,6 +484,15 @@ class PgDatabaseFactory implements DatabaseBackendFactory {
   }
 }
 
+class SqliteDatabaseFactory implements DatabaseBackendFactory {
+  public createAdapter(): DatabaseStorageAdapter {
+    const sqlitePath = getSqlitePath();
+    fs.mkdirSync(path.dirname(sqlitePath), { recursive: true });
+
+    return new DrizzleSqliteDatabaseStorageAdapter({ path: sqlitePath });
+  }
+}
+
 class DatabaseStorageBackend implements StorageBackend {
   private adapter: DatabaseStorageAdapter;
 
@@ -487,7 +503,7 @@ class DatabaseStorageBackend implements StorageBackend {
   public async initialize(): Promise<void> {
     if (!process.env[STORAGE_ENCRYPTION_KEY_ENV]?.trim()) {
       throw new Error(
-        `${STORAGE_ENCRYPTION_KEY_ENV} is required when storage backend is pg`,
+        `${STORAGE_ENCRYPTION_KEY_ENV} is required when storage backend is ${getStorageBackendKind()}`,
       );
     }
 
@@ -496,16 +512,6 @@ class DatabaseStorageBackend implements StorageBackend {
     if (shouldImportLegacyFiles()) {
       await this.importLegacyFiles();
     }
-  }
-
-  public async migrate(): Promise<void> {
-    if (!process.env[STORAGE_ENCRYPTION_KEY_ENV]?.trim()) {
-      throw new Error(
-        `${STORAGE_ENCRYPTION_KEY_ENV} is required when storage backend is pg`,
-      );
-    }
-
-    await this.adapter.migrateSchema();
   }
 
   public async getJson<T>(namespace: string, key: string): Promise<T | null> {
@@ -656,9 +662,17 @@ class DatabaseStorageBackend implements StorageBackend {
 }
 
 const createBackend = (): StorageBackend => {
-  return getStorageBackendKind() === 'pg'
-    ? new DatabaseStorageBackend(new PgDatabaseFactory())
-    : new FileStorageBackend();
+  const backend = getStorageBackendKind();
+
+  if (backend === 'pg') {
+    return new DatabaseStorageBackend(new PgDatabaseFactory());
+  }
+
+  if (backend === 'sqlite') {
+    return new DatabaseStorageBackend(new SqliteDatabaseFactory());
+  }
+
+  return new FileStorageBackend();
 };
 
 const getRuntime = (): StorageRuntime => {
@@ -757,8 +771,8 @@ const getEventBackend = async (): Promise<StorageBackend> => {
   await ensureStorageReady();
   const backend = getRuntime().backend;
 
-  if (getStorageBackendKind() !== 'pg') {
-    throw new Error('Event storage is only available for the pg backend');
+  if (getStorageBackendKind() === 'file') {
+    throw new Error('Event storage is only available for database backends');
   }
 
   return backend;
@@ -812,19 +826,6 @@ export const trimStorageDebugLogs = async (
 ): Promise<void> => {
   const backend = await getEventBackend();
   await backend.trimDebugLogs?.(maxEntries);
-};
-
-export const migrateStorageSchema = async (): Promise<void> => {
-  const runtime = getRuntime();
-
-  if (getStorageBackendKind() !== 'pg' || !runtime.backend.migrate) {
-    throw new Error('Schema migration is only available for the pg backend');
-  }
-
-  await runtime.backend.migrate();
-  runtime.initialized = false;
-  runtime.initializing = null;
-  await ensureStorageReady();
 };
 
 export const resetStorageRuntime = (): void => {

@@ -298,7 +298,7 @@ export const updateDebugSettings = async (
 };
 
 const readDebugLogs = async (): Promise<DebugLogEntry[]> => {
-  if (getStorageBackendMeta().backend === 'pg') {
+  if (getStorageBackendMeta().backend !== 'file') {
     const settings = await getDebugSettings();
     const events = await listStorageDebugLogs(settings.maxEntries);
     return events
@@ -343,7 +343,7 @@ export const clearDebugLogs = async (): Promise<void> => {
     debugFlushTimer = null;
   }
   await enqueueDebugWrite(async () => {
-    if (getStorageBackendMeta().backend === 'pg') {
+    if (getStorageBackendMeta().backend !== 'file') {
       await clearStorageDebugLogs();
       return;
     }
@@ -477,7 +477,7 @@ const flushPendingDebugLogs = async (): Promise<void> => {
 
   try {
     await enqueueDebugWrite(async () => {
-      if (getStorageBackendMeta().backend === 'pg') {
+      if (getStorageBackendMeta().backend !== 'file') {
         const settings = await getDebugSettings();
         await appendStorageDebugLogs(
           entries.map((entry) => ({

@@ -4,11 +4,12 @@ import {
   jsonb,
   pgSchema,
   primaryKey,
+  type PgTableExtraConfigValue,
   text,
   timestamp,
 } from 'drizzle-orm/pg-core';
 
-export const createStorageSchema = (schemaName: string) => {
+export const createPostgresStorageSchema = (schemaName: string) => {
   const schema = pgSchema(schemaName);
 
   const documents = schema.table(
@@ -23,7 +24,7 @@ export const createStorageSchema = (schemaName: string) => {
         .defaultNow()
         .notNull(),
     },
-    (table) => [
+    (table): PgTableExtraConfigValue[] => [
       primaryKey({
         columns: [table.namespace, table.documentKey],
         name: 'documents_namespace_document_key_pk',
@@ -48,7 +49,7 @@ export const createStorageSchema = (schemaName: string) => {
       route: text('route').notNull(),
       totalTokens: integer('total_tokens').notNull(),
     },
-    (table) => [
+    (table): PgTableExtraConfigValue[] => [
       index('usage_events_occurred_at_idx').on(table.occurredAt, table.eventId),
       index('usage_events_credential_occurred_at_idx').on(
         table.credentialFilename,
@@ -77,7 +78,7 @@ export const createStorageSchema = (schemaName: string) => {
       upstreamRequest: jsonb('upstream_request'),
       upstreamResponse: jsonb('upstream_response'),
     },
-    (table) => [
+    (table): PgTableExtraConfigValue[] => [
       index('debug_logs_created_at_idx').on(
         table.createdAt.desc(),
         table.eventId.desc(),
@@ -85,10 +86,11 @@ export const createStorageSchema = (schemaName: string) => {
     ],
   );
 
-  return {
-    debugLogs,
-    documents,
-    schema,
-    usageEvents,
-  };
+  return { debugLogs, documents, schema, usageEvents };
 };
+
+export const {
+  debugLogs: postgresDebugLogs,
+  documents: postgresDocuments,
+  usageEvents: postgresUsageEvents,
+} = createPostgresStorageSchema('codebuddy2api');

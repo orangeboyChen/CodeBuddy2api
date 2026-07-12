@@ -23,10 +23,10 @@ Open `http://127.0.0.1:8001/` after startup.
 Persistence is now routed through a storage abstraction layer. Business modules do not read or write files directly.
 
 - Default backend: `file`
-- Optional backend: `pg`
+- Optional database backends: `pg`, `sqlite`
 - Backend selection:
-  - explicit `CODEBUDDY_STORAGE_BACKEND=file|pg`
-  - explicit `CODEBUDDY_STORAGE_PERSISTENCE=file|pg`
+  - explicit `CODEBUDDY_STORAGE_BACKEND=file|pg|sqlite`
+  - explicit `CODEBUDDY_STORAGE_PERSISTENCE=file|pg|sqlite`
   - otherwise auto-switch to `pg` when `CODEBUDDY_STORAGE_PG_URL` or `DATABASE_URL` is set
   - otherwise fall back to `file`
 
@@ -52,36 +52,29 @@ Optional overrides:
 - `CODEBUDDY_STORAGE_FILE_DIR` changes the file-backend data directory
 - `CODEBUDDY_CONFIG_PATH` is kept only for legacy compatibility with the old runtime config file path
 
-### PostgreSQL Backend
+### Database Backends
 
-When `pg` storage is active, runtime persistence is stored in PostgreSQL instead of local files.
+When `pg` or `sqlite` storage is active, runtime persistence is stored in a database instead of local files.
 
-- `DATABASE_URL` or `CODEBUDDY_STORAGE_PG_URL` provides the connection string
-- `CODEBUDDY_STORAGE_PG_SCHEMA` overrides the default schema `codebuddy2api`
-- `CODEBUDDY_STORAGE_ENCRYPTION_KEY` is required and encrypts sensitive stored documents
+- PostgreSQL uses `DATABASE_URL` or `CODEBUDDY_STORAGE_PG_URL` and the `codebuddy2api` schema
+- SQLite uses `CODEBUDDY_STORAGE_SQLITE_PATH`; the default is `.codebuddy_data/storage.sqlite`
+- `CODEBUDDY_STORAGE_ENCRYPTION_KEY` is required for either database backend and encrypts sensitive stored documents
 
-In `pg` mode, local files are not used for normal runtime persistence. Runtime
+In database mode, local files are not used for normal runtime persistence. Runtime
 configuration, credentials, access keys, and debug settings can be read as an
 optional one-time legacy import source during initialization. Historical usage
 and debug log JSON files are not imported.
 
-Usage and debug records are stored as append-only PostgreSQL event rows with
-retention pruning. This makes their writes safe across application instances.
-Credential rotation checkpoints remain eventually consistent, so replicas can
-occasionally select the same credential.
+Usage and debug records are stored as append-only, indexed event rows with retention
+pruning. PostgreSQL supports concurrent application instances. SQLite is a local,
+single-instance backend. Credential rotation checkpoints remain eventually
+consistent, so PostgreSQL replicas can occasionally select the same credential.
 
-Before switching an existing file-backed deployment to PostgreSQL, keep the
-legacy files available and run the idempotent import once:
-
-```bash
-CODEBUDDY_STORAGE_BACKEND=pg \
-CODEBUDDY_STORAGE_PG_URL='postgres://...' \
-CODEBUDDY_STORAGE_ENCRYPTION_KEY='a stable secret' \
-bun run storage:migrate
-```
-
-Only route traffic to PostgreSQL after the command succeeds. Do not set
-`CODEBUDDY_STORAGE_IMPORT_LEGACY_FILES=false` until the import has completed.
+The application runs the bundled Drizzle migrations during database-backend
+initialization, so deployments do not require a separate schema-creation step.
+Keep legacy files available for the first application start so its idempotent
+import can copy configuration, credentials, access keys, and admin state. Only
+set `CODEBUDDY_STORAGE_IMPORT_LEGACY_FILES=false` after that start has completed.
 
 ## Run Locally
 

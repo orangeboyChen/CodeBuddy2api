@@ -1,4 +1,3 @@
-const execute = vi.fn(async () => undefined);
 const selectLimit = vi.fn<() => Promise<Record<string, unknown>[]>>(
   async () => [],
 );
@@ -15,6 +14,7 @@ const selectWhere = vi.fn(() => ({
 }));
 
 const selectFrom = vi.fn(() => ({
+  limit: selectLimit,
   where: selectWhere,
 }));
 
@@ -33,7 +33,6 @@ const deleteFrom = vi.fn(() => ({
 
 const drizzleMock = vi.fn(() => ({
   delete: deleteFrom,
-  execute,
   insert,
   select: vi.fn(() => ({
     from: selectFrom,
@@ -41,9 +40,14 @@ const drizzleMock = vi.fn(() => ({
 }));
 
 const poolConstructor = vi.fn();
+const migrate = vi.fn(async () => undefined);
 
 vi.mock('drizzle-orm/node-postgres', () => ({
   drizzle: drizzleMock,
+}));
+
+vi.mock('drizzle-orm/node-postgres/migrator', () => ({
+  migrate,
 }));
 
 vi.mock('pg', () => ({
@@ -63,20 +67,16 @@ describe('drizzle pg storage adapter', () => {
 
   it('creates schema and table objects and forwards CRUD operations through drizzle', async () => {
     const { DrizzlePgDatabaseStorageAdapter } =
-      await import('@/lib/server/storage/database');
+      await import('@/lib/server/storage/backends/postgres');
 
     const adapter = new DrizzlePgDatabaseStorageAdapter({
       connectionString: 'postgres://example.test/codebuddy',
       schemaName: 'codebuddy_test',
     });
 
-    await adapter.migrateSchema();
-
     expect(poolConstructor).toHaveBeenCalledWith({
       connectionString: 'postgres://example.test/codebuddy',
     });
-    expect(execute).toHaveBeenCalledTimes(9);
-
     selectLimit.mockResolvedValueOnce([
       {
         encryptedPayload: null,
@@ -160,6 +160,10 @@ describe('drizzle pg storage adapter', () => {
     ]);
     expect(insertOnConflictDoNothing).toHaveBeenCalledTimes(1);
 
+    await adapter.ensureSchema();
+    expect(migrate).toHaveBeenCalledTimes(1);
+    expect(selectLimit).toHaveBeenCalledTimes(4);
+
     await adapter.deleteDocument('config', 'runtime');
     expect(deleteFrom).toHaveBeenCalledTimes(1);
     expect(deleteWhere).toHaveBeenCalledTimes(1);
@@ -167,7 +171,7 @@ describe('drizzle pg storage adapter', () => {
 
   it('returns null when a document is missing', async () => {
     const { DrizzlePgDatabaseStorageAdapter } =
-      await import('@/lib/server/storage/database');
+      await import('@/lib/server/storage/backends/postgres');
 
     const adapter = new DrizzlePgDatabaseStorageAdapter({
       connectionString: 'postgres://example.test/codebuddy',

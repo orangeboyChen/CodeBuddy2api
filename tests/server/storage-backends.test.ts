@@ -23,7 +23,7 @@ describe('storage backends', () => {
     delete process.env.CODEBUDDY_STORAGE_PERSISTENCE;
     delete process.env.CODEBUDDY_STORAGE_PG_URL;
     delete process.env.DATABASE_URL;
-    delete process.env.CODEBUDDY_STORAGE_PG_SCHEMA;
+    delete process.env.CODEBUDDY_STORAGE_SQLITE_PATH;
     delete process.env.CODEBUDDY_STORAGE_IMPORT_LEGACY_FILES;
     delete process.env.CODEBUDDY_STORAGE_ENCRYPTION_KEY;
   });
@@ -59,12 +59,19 @@ describe('storage backends', () => {
     });
 
     process.env.CODEBUDDY_STORAGE_PERSISTENCE = '';
-    process.env.CODEBUDDY_STORAGE_PG_SCHEMA = 'prod-app.schema';
     storage.resetStorageRuntime();
     expect(storage.getStorageBackendMeta()).toEqual({
       backend: 'pg',
       encryptionEnabled: false,
-      schema: 'prod_app_schema',
+      schema: 'codebuddy2api',
+    });
+
+    process.env.CODEBUDDY_STORAGE_BACKEND = 'sqlite';
+    storage.resetStorageRuntime();
+    expect(storage.getStorageBackendMeta()).toEqual({
+      backend: 'sqlite',
+      encryptionEnabled: false,
+      schema: null,
     });
   });
 
@@ -79,6 +86,17 @@ describe('storage backends', () => {
       'CODEBUDDY_STORAGE_ENCRYPTION_KEY is required when storage backend is pg',
     );
     storage.resetStorageRuntime();
+  });
+
+  it('rejects a credential path that is not a directory', async () => {
+    fs.mkdirSync(tempRootDir, { recursive: true });
+    fs.writeFileSync(tempCredsDir, '{}');
+
+    const storage = await import('@/lib/server/storage');
+
+    await expect(storage.ensureStorageReady()).rejects.toThrow(
+      `${tempCredsDir} must be a directory`,
+    );
   });
 
   it('migrates legacy config documents into the default file storage directory', async () => {
@@ -187,7 +205,7 @@ describe('storage backends', () => {
     const putDocument = vi.fn(async () => undefined);
     const deleteDocument = vi.fn(async () => undefined);
 
-    vi.doMock('@/lib/server/storage/database', () => ({
+    vi.doMock('@/lib/server/storage/backends/postgres', () => ({
       DrizzlePgDatabaseStorageAdapter: class MockAdapter {
         public deleteDocument = deleteDocument;
         public ensureSchema = ensureSchema;

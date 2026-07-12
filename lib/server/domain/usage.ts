@@ -217,7 +217,7 @@ const trimExpiredEvents = (
 };
 
 const readUsageStore = async (): Promise<UsageStore> => {
-  if (getStorageBackendMeta().backend === 'pg') {
+  if (getStorageBackendMeta().backend !== 'file') {
     const events = await listStorageUsageEvents(
       new Date(Date.now() - MAX_RETENTION_MS),
     );
@@ -272,7 +272,7 @@ const flushPendingUsageEvents = async (): Promise<void> => {
     await enqueueUsageMutation(async () => {
       const nowMs = Date.now();
 
-      if (getStorageBackendMeta().backend === 'pg') {
+      if (getStorageBackendMeta().backend !== 'file') {
         await appendStorageUsageEvents(
           events.map((event) => ({
             id: crypto.randomUUID(),
@@ -547,7 +547,7 @@ export const clearUsageHistory = async (): Promise<void> => {
     usageFlushTimer = null;
   }
   await enqueueUsageMutation(async () => {
-    if (getStorageBackendMeta().backend === 'pg') {
+    if (getStorageBackendMeta().backend !== 'file') {
       await clearStorageUsageEvents();
       return;
     }
