@@ -5,7 +5,10 @@ import {
   beginAdminPasskeyAuthentication,
   beginAdminPasskeyRegistration,
   changeAdminPassword,
+  deleteAdminPasskey,
   disableAdminAuthentication,
+  finishAdminPasskeyAuthentication,
+  finishAdminPasskeyRegistration,
   getAdminSessionErrorResponse,
   getAdminSessionSummary,
   hasAdminAccount,
@@ -174,6 +177,63 @@ describe('admin auth and storage', () => {
     expect(await hasAdminAccountAsync()).toBe(true);
   });
 
+  it('rejects invalid usernames and password credentials', async () => {
+    expect(
+      (
+        await setupAdminPassword(
+          makeRequest('/admin-api/auth/setup'),
+          'no',
+          'correct horse battery staple',
+        )
+      ).status,
+    ).toBe(400);
+
+    const setupResponse = await setupAdminPassword(
+      makeRequest('/admin-api/auth/setup'),
+      'operator',
+      'correct horse battery staple',
+    );
+    const sessionCookie = getCookieHeader(setupResponse);
+
+    expect(
+      (
+        await loginWithAdminPassword(
+          makeRequest('/admin-api/auth/session'),
+          'admin',
+          'correct horse battery staple',
+        )
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await loginWithAdminPassword(
+          makeRequest('/admin-api/auth/session'),
+          'operator',
+          'wrong password',
+        )
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await changeAdminPassword(
+          makeRequest('/admin-api/auth/password', { cookie: sessionCookie }),
+          'correct horse battery staple',
+          'new correct horse battery staple',
+          'x',
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await changeAdminPassword(
+          makeRequest('/admin-api/auth/password', { cookie: sessionCookie }),
+          'wrong password',
+          'new correct horse battery staple',
+        )
+      ).status,
+    ).toBe(401);
+  });
+
   it('changes an authenticated admin password and revokes other sessions', async () => {
     const setupResponse = await setupAdminPassword(
       makeRequest('/admin-api/auth/setup'),
@@ -338,6 +398,48 @@ describe('admin auth and storage', () => {
       'Local key',
     );
     expect(localhostRegistration.status).toBe(200);
+
+    const insecureRegistration = await beginAdminPasskeyRegistration(
+      makeRequest('/admin-api/auth/passkeys/registration/options', {
+        cookie: setupCookie,
+        host: 'admin.example.com',
+      }),
+      'Insecure key',
+    );
+    expect(insecureRegistration.status).toBe(400);
+    expect(
+      (
+        await finishAdminPasskeyRegistration(
+          makeRequest('/admin-api/auth/passkeys/registration/verify', {
+            cookie: setupCookie,
+            host: 'admin.example.com',
+          }),
+          {},
+          'Insecure key',
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await deleteAdminPasskey(
+          makeRequest('/admin-api/auth/passkeys/missing', {
+            cookie: setupCookie,
+          }),
+          'missing',
+        )
+      ).status,
+    ).toBe(404);
+  });
+
+  it('rejects passkey authentication while admin authentication is disabled', async () => {
+    expect(
+      (
+        await finishAdminPasskeyAuthentication(
+          makeRequest('/admin-api/auth/passkeys/authentication/verify'),
+          { id: 'missing' },
+        )
+      ).status,
+    ).toBe(400);
   });
 
   it('covers file storage read write list delete and metadata helpers', async () => {
