@@ -90,6 +90,16 @@ describe('admin auth passkeys', () => {
       verified: true,
     });
 
+    const preseededRegistrationResponse =
+      await adminAuth.beginAdminPasskeyRegistration(
+        makeRequest('/admin-api/auth/passkeys/registration/options', {
+          host: 'admin.example.com',
+          protocol: 'https',
+        }),
+        'Untrusted key',
+      );
+    expect(preseededRegistrationResponse.status).toBe(401);
+
     const setupResponse = await adminAuth.setupAdminPassword(
       makeRequest('/admin-api/auth/setup', {
         host: 'admin.example.com',

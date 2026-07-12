@@ -16,6 +16,7 @@
     "statusValue": "{count} 个有效",
     "tabsLabel": "管理导航",
     "themeLabel": "主题",
+    "languageSystem": "跟随系统",
     "themeSystem": "跟随系统",
     "themeLight": "浅色",
     "themeDark": "深色",
@@ -65,7 +66,7 @@
       "title": "服务配置"
     },
     "securityPanel": {
-      "title": "管理员安全",
+      "title": "控制台安全",
       "enabled": "鉴权已启用。",
       "disabled": "鉴权未启用，控制台可直接访问。",
       "enable": "启用管理员鉴权",
@@ -76,7 +77,7 @@
       "confirmPassword": "确认密码",
       "minimumPassword": "至少 8 位",
       "update": "更新管理员账户",
-      "saveAndEnable": "保存并启用管理员鉴权",
+      "saveAndEnable": "保存",
       "disable": "关闭管理员鉴权",
       "passkeyName": "Passkey 名称（可选）",
       "addPasskey": "添加 Passkey",

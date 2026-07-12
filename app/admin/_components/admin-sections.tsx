@@ -15,7 +15,6 @@ import type {
 import {
   ActionIcon,
   Block,
-  Button,
   Avatar,
   Checkbox,
   Flexbox,
@@ -23,7 +22,7 @@ import {
   Tag,
   TextArea,
 } from '@lobehub/ui';
-import { Select, Switch, Tabs } from '@lobehub/ui/base-ui';
+import { Button, Select, Switch, Tabs } from '@lobehub/ui/base-ui';
 import {
   BarChart3,
   Bug,
@@ -46,7 +45,6 @@ import {
   MousePointerClick,
   Pencil,
   Play,
-  Plus,
   RefreshCw,
   Save,
   Server,
@@ -156,6 +154,27 @@ const CHART_COLORS = [
   '#0891b2',
 ];
 
+const FOLLOW_CURRENT_CREDENTIAL_VALUE = '__follow_current_rotation__';
+
+const parseSseEvents = (value: unknown) => {
+  if (typeof value !== 'string' || !/(?:^|\n)data:/.test(value)) {
+    return null;
+  }
+
+  const events = value
+    .split(/\r?\n\r?\n/)
+    .map((event) =>
+      event
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice('data:'.length).trim())
+        .join('\n'),
+    )
+    .filter(Boolean);
+
+  return events.length ? events : null;
+};
+
 const TAB_ICONS: Record<TabKey, LucideIcon> = {
   'api-test': Send,
   credentials: KeyRound,
@@ -229,18 +248,19 @@ const getLocalizedAdminText = (locale: AppLocale) => {
       credentialEmpty:
         'No credentials yet. Authenticate or add one manually first.',
       credentialExpired: 'Expired credentials',
-      credentialRefreshList: 'Refresh list',
+      credentialRefreshList: 'Refresh',
       credentialResponsesDirect: 'Send Responses requests upstream directly',
       credentialResponsesDirectHelp:
         'When enabled, `/v1/responses` requests using this credential are sent upstream directly instead of being converted into Chat Completions.',
       credentialResponsesProxy:
         'Convert Responses requests to Chat Completions before sending upstream',
+      credentialResponsesProxyTag: 'Responses → Chat',
       credentialRoleAsSystem: 'Normalize developer messages for upstream',
+      credentialRoleAsSystemTag: 'developer → system',
       credentialRoleAsSystemHelp:
         'Sends the first developer message as system and later developer messages as user.',
-      credentialRoleKeepDeveloper:
-        'Keep the developer role when converting to Chat Completions',
-      credentialSave: 'Save credential',
+      credentialRoleKeepDeveloper: 'Keep developer',
+      credentialSave: 'Save',
       credentialSectionTitle: 'Saved credentials',
       credentialUserId: 'User ID (optional)',
       credentialUserIdPlaceholder: 'Enter the user ID (optional)',
@@ -256,6 +276,10 @@ const getLocalizedAdminText = (locale: AppLocale) => {
       dashboardServiceStatus: 'Service status',
       debugClear: 'Clear',
       debugCopy: 'Copy',
+      debugEventData: 'Data',
+      debugEventIndex: 'Event',
+      debugCredential: 'Credential',
+      debugCredentialUnknown: 'Not recorded',
       debugEmpty: 'No debug records yet.',
       debugEnable: 'Enable debug capture',
       debugEnableHelp:
@@ -266,7 +290,7 @@ const getLocalizedAdminText = (locale: AppLocale) => {
       debugRefreshInterval: 'Auto-refresh interval',
       debugRequest: 'Original request',
       debugResponse: 'Transformed response',
-      debugSave: 'Save debug settings',
+      debugSave: 'Save',
       debugSectionTitle: 'Debug records',
       debugUpstreamRequest: 'Upstream request',
       debugUpstreamResponse: 'Upstream response',
@@ -292,12 +316,14 @@ const getLocalizedAdminText = (locale: AppLocale) => {
       save: 'Save',
       serviceCheckedAt: (value: string) => `Last checked ${value}`,
       settingsLoading: 'Loading settings...',
-      settingsSave: 'Save settings',
+      settingsSave: 'Save',
       settingsTitle: 'Service settings',
       statusUnavailable: 'Unavailable',
       statusRunning: 'Running',
       submit: 'Submit',
       usageAccessKey: 'API key',
+      usageAllAccessKeys: 'All API keys',
+      usageAllCredentials: 'All credentials',
       usageAutoRefresh: 'Auto-refresh',
       usageCallTrend: 'Call trend',
       usageCallsToday: 'Calls today',
@@ -385,18 +411,19 @@ const getLocalizedAdminText = (locale: AppLocale) => {
       credentialEmpty:
         '認証情報がありません。先に認証するか手動で追加してください。',
       credentialExpired: '期限切れの認証情報',
-      credentialRefreshList: '一覧を更新',
+      credentialRefreshList: '更新',
       credentialResponsesDirect: 'Responses リクエストを上流へ直接送信',
       credentialResponsesDirectHelp:
         '有効にすると、この認証情報で処理される `/v1/responses` リクエストは Chat Completions へ変換せず上流へ直接送信されます。',
       credentialResponsesProxy:
         'Responses リクエストを Chat Completions に変換してから上流へ送信',
+      credentialResponsesProxyTag: 'Responses → Chat',
       credentialRoleAsSystem: 'developer メッセージを上流向けに正規化',
+      credentialRoleAsSystemTag: 'developer → system',
       credentialRoleAsSystemHelp:
         '先頭の developer メッセージは system、それ以降の developer メッセージは user として送信します。',
-      credentialRoleKeepDeveloper:
-        'Chat Completions 変換時に developer ロールを保持',
-      credentialSave: '認証情報を保存',
+      credentialRoleKeepDeveloper: 'developer を保持',
+      credentialSave: '保存',
       credentialSectionTitle: '保存済み認証情報',
       credentialUserId: 'ユーザー ID (任意)',
       credentialUserIdPlaceholder: 'ユーザー ID を入力 (任意)',
@@ -412,6 +439,10 @@ const getLocalizedAdminText = (locale: AppLocale) => {
       dashboardServiceStatus: 'サービス稼働状況',
       debugClear: 'クリア',
       debugCopy: 'コピー',
+      debugEventData: 'データ',
+      debugEventIndex: 'イベント',
+      debugCredential: '認証情報',
+      debugCredentialUnknown: '記録なし',
       debugEmpty: 'Debug 記録はまだありません。',
       debugEnable: 'Debug 収集を有効化',
       debugEnableHelp:
@@ -422,7 +453,7 @@ const getLocalizedAdminText = (locale: AppLocale) => {
       debugRefreshInterval: '自動更新間隔',
       debugRequest: '元のリクエスト',
       debugResponse: '変換後レスポンス',
-      debugSave: 'Debug 設定を保存',
+      debugSave: '保存',
       debugSectionTitle: 'Debug 記録',
       debugUpstreamRequest: '上流リクエスト',
       debugUpstreamResponse: '上流レスポンス',
@@ -449,12 +480,14 @@ const getLocalizedAdminText = (locale: AppLocale) => {
       save: '保存',
       serviceCheckedAt: (value: string) => `最終確認 ${value}`,
       settingsLoading: '設定を読み込んでいます...',
-      settingsSave: '設定を保存',
+      settingsSave: '保存',
       settingsTitle: 'サービス設定',
       statusUnavailable: '利用不可',
       statusRunning: '稼働中',
       submit: '送信',
       usageAccessKey: 'API key',
+      usageAllAccessKeys: 'すべての API key',
+      usageAllCredentials: 'すべての認証情報',
       usageAutoRefresh: '自動更新',
       usageCallTrend: '呼び出し推移',
       usageCallsToday: '本日の呼び出し回数',
@@ -538,18 +571,19 @@ const getLocalizedAdminText = (locale: AppLocale) => {
       credentialEditTitle: '编辑凭证配置',
       credentialEmpty: '暂无凭证，请先认证或手动添加。',
       credentialExpired: '已过期凭证',
-      credentialRefreshList: '刷新列表',
+      credentialRefreshList: '刷新',
       credentialResponsesDirect: '直接转发 Responses 请求至上游',
       credentialResponsesDirectHelp:
         '开启后，该凭证命中的 `/v1/responses` 请求将直接发送至上游，不再转换为 Chat Completions。',
       credentialResponsesProxy:
         'Responses 请求先转换为 Chat Completions 再发送至上游',
+      credentialResponsesProxyTag: 'Responses → Chat',
       credentialRoleAsSystem: '转换 developer 消息角色以兼容上游',
+      credentialRoleAsSystemTag: 'developer → system',
       credentialRoleAsSystemHelp:
         '首条 developer 消息作为 system 发送，其余 developer 消息作为 user 发送。',
-      credentialRoleKeepDeveloper:
-        '转换为 Chat Completions 时保留 developer 角色',
-      credentialSave: '保存凭证',
+      credentialRoleKeepDeveloper: '保留 developer',
+      credentialSave: '保存',
       credentialSectionTitle: '已保存的凭证',
       credentialUserId: '用户 ID (可选)',
       credentialUserIdPlaceholder: '输入用户 ID (可选)',
@@ -565,6 +599,10 @@ const getLocalizedAdminText = (locale: AppLocale) => {
       dashboardServiceStatus: '服务运行状态',
       debugClear: '清空',
       debugCopy: '复制',
+      debugEventData: '内容',
+      debugEventIndex: '事件',
+      debugCredential: '凭据',
+      debugCredentialUnknown: '未记录',
       debugEmpty: '暂无 Debug 记录。',
       debugEnable: '启用 Debug 采集',
       debugEnableHelp:
@@ -575,7 +613,7 @@ const getLocalizedAdminText = (locale: AppLocale) => {
       debugRefreshInterval: '自动刷新时间',
       debugRequest: '原始请求',
       debugResponse: '转换后回包',
-      debugSave: '保存 Debug 设置',
+      debugSave: '保存',
       debugSectionTitle: 'Debug 记录',
       debugUpstreamRequest: '上游请求',
       debugUpstreamResponse: '上游回包',
@@ -601,12 +639,14 @@ const getLocalizedAdminText = (locale: AppLocale) => {
       save: '保存',
       serviceCheckedAt: (value: string) => `最后检查 ${value}`,
       settingsLoading: '加载配置中...',
-      settingsSave: '保存设置',
+      settingsSave: '保存',
       settingsTitle: '服务配置',
       statusUnavailable: '不可用',
       statusRunning: '运行中',
       submit: '提交',
       usageAccessKey: 'API Key',
+      usageAllAccessKeys: '全部 API Key',
+      usageAllCredentials: '全部凭据',
       usageAutoRefresh: '自动刷新',
       usageCallTrend: '调用次数趋势',
       usageCallsToday: '今日调用次数',
@@ -750,6 +790,23 @@ const formatNumber = (locale: AppLocale, value: number) => {
   return new Intl.NumberFormat(locale).format(value);
 };
 
+const formatCompactNumber = (locale: AppLocale, value: number) => {
+  const units = [
+    { divisor: 1_000_000_000, suffix: 'b' },
+    { divisor: 1_000_000, suffix: 'm' },
+    { divisor: 1_000, suffix: 'k' },
+  ];
+  const unit = units.find((item) => Math.abs(value) >= item.divisor);
+
+  if (!unit) {
+    return formatNumber(locale, value);
+  }
+
+  return `${new Intl.NumberFormat(locale, {
+    maximumFractionDigits: 1,
+  }).format(value / unit.divisor)}${unit.suffix}`;
+};
+
 const SectionTitle = ({
   icon: Icon,
   title,
@@ -827,8 +884,12 @@ const getMonotoneLinePath = (points: Array<{ x: number; y: number }>) => {
   return `M ${points[0].x} ${points[0].y} ${segments.join(' ')}`;
 };
 
+const USAGE_CHART_DESKTOP_WIDTH = 1000;
+const USAGE_CHART_MOBILE_WIDTH = 320;
+
 const renderUsageChart = ({
   chart,
+  chartWidth: width,
   emptyLabel,
   hoveredPoint,
   locale,
@@ -839,6 +900,7 @@ const renderUsageChart = ({
   title,
 }: {
   chart: 'calls' | 'tokens';
+  chartWidth: number;
   emptyLabel: string;
   hoveredPoint: UsageState['hoveredPoint'];
   locale: AppLocale;
@@ -848,18 +910,21 @@ const renderUsageChart = ({
   series: UsageState['callSeries'];
   title: string;
 }) => {
-  const width = 760;
-  const height = 224;
-  const padding = { bottom: 30, left: 44, right: 16, top: 14 };
+  const height = 260;
+  const padding = { bottom: 36, left: 52, right: 24, top: 16 };
   const firstSeries = series[0];
   const labels = firstSeries?.points.map((point) => point.label) ?? [];
   const pointCount = labels.length;
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
-  const maxValue = Math.max(
+  const axisLabelFontSize = width < 640 ? 11 : 8;
+  const largestValue = Math.max(
     1,
     ...series.flatMap((item) => item.points.map((point) => point[metric] ?? 0)),
   );
+  const gridStep = Math.max(5, Math.ceil(largestValue / 20) * 5);
+  const gridStepCount = Math.ceil(largestValue / gridStep);
+  const maxValue = gridStep * gridStepCount;
 
   const getX = (index: number) => {
     if (pointCount <= 1) {
@@ -873,10 +938,9 @@ const renderUsageChart = ({
     return padding.top + chartHeight - (value / maxValue) * chartHeight;
   };
 
-  const gridStepCount = Math.min(3, Math.max(1, Math.floor(maxValue)));
   const gridValues = Array.from(
     { length: gridStepCount },
-    (_, index) => (maxValue / gridStepCount) * (index + 1),
+    (_, index) => gridStep * (index + 1),
   ).reverse();
   const xLabelInterval = Math.max(1, Math.ceil((pointCount - 1) / 3));
 
@@ -893,12 +957,12 @@ const renderUsageChart = ({
                 <Flexbox align="center" gap={6} horizontal key={item.model}>
                   <span
                     aria-hidden="true"
-                    className="h-0.5 w-4 rounded-full"
+                    className="h-px w-3 rounded-full"
                     // eslint-disable-next-line react/forbid-dom-props
                     style={{ backgroundColor: color }}
                   />
                   <span
-                    className="text-xs font-medium"
+                    className="text-[11px] font-medium"
                     // eslint-disable-next-line react/forbid-dom-props
                     style={{ color }}
                   >
@@ -910,7 +974,7 @@ const renderUsageChart = ({
           </Flexbox>
           <svg
             aria-label={title}
-            className="h-auto w-full overflow-visible"
+            className="usage-chart-svg h-auto w-full overflow-visible"
             role="img"
             viewBox={`0 0 ${width} ${height}`}
           >
@@ -926,14 +990,17 @@ const renderUsageChart = ({
                     y1={y}
                     y2={y}
                     className="stroke-border-light dark:stroke-border-dark"
+                    strokeWidth="1"
+                    vectorEffect="non-scaling-stroke"
                   />
                   <text
                     x={padding.left - 10}
                     y={y + 4}
-                    className="fill-secondary text-[9px]"
+                    className="fill-secondary"
+                    fontSize={axisLabelFontSize}
                     textAnchor="end"
                   >
-                    {formatNumber(locale, Math.round(value))}
+                    {formatCompactNumber(locale, value)}
                   </text>
                 </g>
               );
@@ -953,7 +1020,8 @@ const renderUsageChart = ({
                     stroke={color}
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    strokeWidth="2"
+                    strokeWidth="1.5"
+                    vectorEffect="non-scaling-stroke"
                   />
                   {item.points.map((point, pointIndex) => {
                     const value = point[metric] ?? 0;
@@ -966,7 +1034,9 @@ const renderUsageChart = ({
                         cx={x}
                         cy={y}
                         fill={color}
-                        r="3"
+                        r="2"
+                        stroke="transparent"
+                        strokeWidth="8"
                         tabIndex={0}
                         onBlur={() => {
                           onHoverPoint(null);
@@ -1013,7 +1083,8 @@ const renderUsageChart = ({
                 key={`${title}-${label}`}
                 x={getX(index)}
                 y={height - 10}
-                className="fill-secondary text-[9px]"
+                className="fill-secondary"
+                fontSize={axisLabelFontSize}
                 textAnchor={
                   index === 0
                     ? 'start'
@@ -1078,9 +1149,11 @@ const SettingsInput = ({
   settingKey,
   value,
   onChange,
+  placeholder,
 }: {
   label: string;
   onChange: (value: string) => void;
+  placeholder?: string;
   settingKey: string;
   value: string;
 }) => {
@@ -1187,6 +1260,7 @@ const SettingsInput = ({
       </label>
       <Input
         id={settingKey}
+        placeholder={placeholder}
         type="text"
         value={value}
         onChange={(event) => {
@@ -1268,10 +1342,16 @@ const CredentialCard = ({
   const isEditing = form.editingIndex === credential.index;
 
   return (
-    <Block direction="vertical" gap={16} padding={24} variant="outlined">
-      <div className="flex items-center gap-4">
+    <Block
+      className="credential-card"
+      direction="vertical"
+      gap={16}
+      padding={24}
+      variant="outlined"
+    >
+      <div className="credential-card-header flex items-center gap-4">
         <Avatar avatar={avatarText || 'C'} size={48} />
-        <div className="flex-1 min-w-0">
+        <div className="credential-card-content flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-2">
             <div className="font-semibold text-text-light dark:text-text-dark">
               {credential.filename}
@@ -1300,16 +1380,16 @@ const CredentialCard = ({
             <Tag>
               {credential.responses_passthrough
                 ? text.credentialResponsesDirect
-                : text.credentialResponsesProxy}
+                : text.credentialResponsesProxyTag}
             </Tag>
             <Tag>
               {credential.first_message_role_to_system
-                ? text.credentialRoleAsSystem
+                ? text.credentialRoleAsSystemTag
                 : text.credentialRoleKeepDeveloper}
             </Tag>
           </Flexbox>
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="credential-card-actions flex gap-2 shrink-0">
           <Button icon={Pencil} onClick={onEdit} type="primary">
             {text.edit}
           </Button>
@@ -1338,11 +1418,11 @@ const CredentialCard = ({
             />
           </div>
           <Flexbox gap={8} horizontal>
-            <Button icon={Save} onClick={onSaveCredential} type="primary">
-              {text.credentialSave}
-            </Button>
             <Button icon={X} onClick={onResetCredentialForm}>
               {common('cancel')}
+            </Button>
+            <Button icon={Save} onClick={onSaveCredential} type="primary">
+              {text.credentialSave}
             </Button>
           </Flexbox>
         </Flexbox>
@@ -1374,44 +1454,63 @@ const CredentialGroup = ({
   onEdit: (credential: CredentialSummary) => void;
   onResetCredentialForm: () => void;
   onSaveCredential: () => void;
-  title: string;
+  title?: string;
 }) => {
   if (!items.length) {
     return null;
   }
 
+  const cards = (
+    <div className="grid gap-4">
+      {items.map((credential) => (
+        <CredentialCard
+          key={credential.filename}
+          credential={credential}
+          current={current}
+          form={form}
+          locale={locale}
+          onCredentialFirstMessageRoleToSystemChange={
+            onCredentialFirstMessageRoleToSystemChange
+          }
+          onCredentialResponsesPassthroughChange={
+            onCredentialResponsesPassthroughChange
+          }
+          onDelete={() => {
+            onDelete(credential.index);
+          }}
+          onEdit={() => {
+            onEdit(credential);
+          }}
+          onResetCredentialForm={onResetCredentialForm}
+          onSaveCredential={onSaveCredential}
+        />
+      ))}
+    </div>
+  );
+
+  if (!title) {
+    return <div className="mb-6">{cards}</div>;
+  }
+
   return (
     <div className="mb-6">
-      <Block direction="vertical" gap={16} padding={24} variant="outlined">
-        <Flexbox align="center" distribution="space-between" horizontal>
+      <Block
+        className="credentials-group"
+        direction="vertical"
+        gap={16}
+        padding={24}
+        variant="outlined"
+      >
+        <Flexbox
+          align="center"
+          className="credential-group-heading"
+          distribution="space-between"
+          horizontal
+        >
           <SectionTitle icon={Layers3} title={title} />
           <Tag>{items.length}</Tag>
         </Flexbox>
-        <div className="grid gap-4">
-          {items.map((credential) => (
-            <CredentialCard
-              key={credential.filename}
-              credential={credential}
-              current={current}
-              form={form}
-              locale={locale}
-              onCredentialFirstMessageRoleToSystemChange={
-                onCredentialFirstMessageRoleToSystemChange
-              }
-              onCredentialResponsesPassthroughChange={
-                onCredentialResponsesPassthroughChange
-              }
-              onDelete={() => {
-                onDelete(credential.index);
-              }}
-              onEdit={() => {
-                onEdit(credential);
-              }}
-              onResetCredentialForm={onResetCredentialForm}
-              onSaveCredential={onSaveCredential}
-            />
-          ))}
-        </div>
+        {cards}
       </Block>
     </div>
   );
@@ -1453,9 +1552,15 @@ const AccessKeyCard = ({
   const isBusy = actionId === accessKey.id;
 
   return (
-    <Block direction="vertical" gap={16} padding={24} variant="outlined">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
+    <Block
+      className="access-key-card"
+      direction="vertical"
+      gap={16}
+      padding={24}
+      variant="outlined"
+    >
+      <div className="access-key-card-header flex items-start justify-between gap-4">
+        <div className="access-key-card-content min-w-0">
           <div className="flex items-center gap-2 mb-2">
             <div className="font-semibold text-text-light dark:text-text-dark">
               {accessKey.name}
@@ -1487,7 +1592,7 @@ const AccessKeyCard = ({
             ))}
           </Flexbox>
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="access-key-card-actions flex gap-2 shrink-0">
           <Button disabled={isBusy} icon={Eye} onClick={onRevealSecret}>
             {text.viewKey}
           </Button>
@@ -1586,6 +1691,9 @@ const AccessKeyCard = ({
             </div>
           </div>
           <div className="mt-4 flex gap-2">
+            <Button icon={X} onClick={onResetAccessKeyForm}>
+              {common('cancel')}
+            </Button>
             <Button
               disabled={isBusy}
               icon={Save}
@@ -1593,9 +1701,6 @@ const AccessKeyCard = ({
               type="primary"
             >
               {text.save}
-            </Button>
-            <Button icon={X} onClick={onResetAccessKeyForm}>
-              {common('cancel')}
             </Button>
           </div>
         </Flexbox>
@@ -1611,6 +1716,7 @@ export const TabNav = ({ activeTab, onChange }: TabNavProps) => {
     <Tabs
       activeKey={activeTab}
       className="console-tabs"
+      classNames={{ indicator: 'console-tabs-indicator' }}
       items={TAB_ITEMS.map((tab) => {
         const Icon = TAB_ICONS[tab.key];
 
@@ -1623,7 +1729,7 @@ export const TabNav = ({ activeTab, onChange }: TabNavProps) => {
       onChange={(key) => {
         onChange(key as TabKey);
       }}
-      variant="point"
+      variant="square"
     />
   );
 };
@@ -1635,8 +1741,14 @@ export const DashboardSection = ({
 }: DashboardSectionProps) => {
   const locale = useLocale() as AppLocale;
   const text = getLocalizedAdminText(locale);
-  const uptimeText =
-    state.uptimeText || state.lastCheckedAt || text.dashboardRefreshPending;
+  const checkedAtText =
+    state.lastCheckedAt || state.uptimeText || text.dashboardRefreshPending;
+  const statusText =
+    state.serviceStatus === 'online'
+      ? text.statusRunning
+      : state.serviceStatus === 'offline'
+        ? text.statusUnavailable
+        : state.statusText;
 
   return (
     <Flexbox direction="vertical" gap={24} id="dashboard">
@@ -1730,7 +1842,7 @@ export const DashboardSection = ({
               className="text-2xl font-bold text-text-light dark:text-text-dark leading-none"
               id="statusText"
             >
-              {state.statusText}
+              {statusText}
             </div>
             <Tag
               color={
@@ -1746,10 +1858,16 @@ export const DashboardSection = ({
               <span id="statusDot" />
             </Tag>
           </Flexbox>
-          <Flexbox align="center" gap={4} horizontal id="uptimeTrend">
+          <Flexbox
+            align="center"
+            className="dashboard-metric-footer"
+            gap={4}
+            horizontal
+            id="uptimeTrend"
+          >
             <Clock3 aria-hidden="true" size={14} strokeWidth={2} />
             <span aria-live="polite" id="uptime">
-              {uptimeText}
+              {checkedAtText}
             </span>
           </Flexbox>
         </Block>
@@ -1837,9 +1955,15 @@ export const DashboardSection = ({
               </div>
             </div>
           </Flexbox>
-          <Flexbox align="center" gap={4} horizontal id="apiCallsTrend">
-            <RefreshCw aria-hidden="true" size={14} strokeWidth={2} />
-            {state.lastCheckedAt || text.dashboardRefreshPending}
+          <Flexbox
+            align="center"
+            className="dashboard-metric-footer"
+            gap={4}
+            horizontal
+            id="apiCallsTrend"
+          >
+            <Clock3 aria-hidden="true" size={14} strokeWidth={2} />
+            <span>{checkedAtText}</span>
           </Flexbox>
         </Block>
       </div>
@@ -1963,6 +2087,14 @@ export const UsageSection = ({
   const text = getLocalizedAdminText(locale);
   const autoRefreshOptions = getUsageAutoRefreshOptions(locale);
   const rangeOptions = getUsageRangeOptions(text);
+  const credentialOptions = state.filters.credentials.map((option) => ({
+    ...option,
+    label: option.value === 'all' ? text.usageAllCredentials : option.label,
+  }));
+  const accessKeyOptions = state.filters.accessKeys.map((option) => ({
+    ...option,
+    label: option.value === 'all' ? text.usageAllAccessKeys : option.label,
+  }));
 
   return (
     <div id="usage" className="block">
@@ -1975,7 +2107,7 @@ export const UsageSection = ({
           variant="outlined"
         >
           <div className="flex items-center gap-3 text-sm text-text-light dark:text-text-dark">
-            <label className="inline-flex items-center gap-2 text-secondary">
+            <label className="usage-auto-refresh-label inline-flex items-center gap-2 text-secondary">
               {text.usageAutoRefresh}
               <Select
                 aria-label={text.usageAutoRefresh}
@@ -2018,7 +2150,7 @@ export const UsageSection = ({
                 className="w-full"
                 value={state.request.credential}
                 onChange={onCredentialChange}
-                options={state.filters.credentials}
+                options={credentialOptions}
               />
             </label>
             <label className="block">
@@ -2030,7 +2162,7 @@ export const UsageSection = ({
                 className="w-full"
                 value={state.request.accessKey}
                 onChange={onAccessKeyChange}
-                options={state.filters.accessKeys}
+                options={accessKeyOptions}
               />
             </label>
           </div>
@@ -2087,9 +2219,10 @@ export const UsageSection = ({
         </Block>
       </div>
 
-      <div className="grid gap-6 mb-6">
+      <div className="usage-chart-desktop grid gap-6 mb-6">
         {renderUsageChart({
           chart: 'calls',
+          chartWidth: USAGE_CHART_DESKTOP_WIDTH,
           emptyLabel: text.usageEmptyCalls,
           hoveredPoint: state.hoveredPoint,
           locale,
@@ -2101,6 +2234,33 @@ export const UsageSection = ({
         })}
         {renderUsageChart({
           chart: 'tokens',
+          chartWidth: USAGE_CHART_DESKTOP_WIDTH,
+          emptyLabel: text.usageEmptyTokens,
+          hoveredPoint: state.hoveredPoint,
+          locale,
+          metric: 'totalTokens',
+          onHoverPoint,
+          series: state.tokenSeries,
+          text,
+          title: text.usageTokenTrend,
+        })}
+      </div>
+      <div className="usage-chart-mobile grid gap-6 mb-6">
+        {renderUsageChart({
+          chart: 'calls',
+          chartWidth: USAGE_CHART_MOBILE_WIDTH,
+          emptyLabel: text.usageEmptyCalls,
+          hoveredPoint: state.hoveredPoint,
+          locale,
+          metric: 'callCount',
+          onHoverPoint,
+          series: state.callSeries,
+          text,
+          title: text.usageCallTrend,
+        })}
+        {renderUsageChart({
+          chart: 'tokens',
+          chartWidth: USAGE_CHART_MOBILE_WIDTH,
           emptyLabel: text.usageEmptyTokens,
           hoveredPoint: state.hoveredPoint,
           locale,
@@ -2273,7 +2433,6 @@ export const CredentialsSection = ({
               variant="outlined"
             >
               <div className="text-center p-4">
-                <Clock3 />
                 <div>{auth.message || text.autoAuthPending}</div>
                 <small className="text-secondary">
                   {text.autoAuthPendingHint}
@@ -2383,7 +2542,7 @@ export const CredentialsSection = ({
             />
           </div>
           <Flexbox horizontal>
-            <Button icon={Plus} onClick={onAddCredential} type="primary">
+            <Button icon={Save} onClick={onAddCredential} type="primary">
               {text.save}
             </Button>
           </Flexbox>
@@ -2462,13 +2621,6 @@ export const CredentialsSection = ({
               </div>
               {credentials.current?.status !== 'no_credentials' ? (
                 <div className="flex flex-wrap gap-4 text-sm text-secondary mt-2">
-                  {credentials.current?.next_filename ? (
-                    <span className="flex items-center gap-1">
-                      <Info />
-                      {text.credentialBadgeNext}{' '}
-                      {credentials.current.next_filename}
-                    </span>
-                  ) : null}
                   {credentials.current?.available_credential_count !==
                   undefined ? (
                     <span className="flex items-center gap-1">
@@ -2505,7 +2657,6 @@ export const CredentialsSection = ({
                 onEdit={onEditCredential}
                 onResetCredentialForm={onResetCredentialForm}
                 onSaveCredential={onAddCredential}
-                title={text.availableCredentials}
               />
               <CredentialGroup
                 current={credentials.current}
@@ -2568,10 +2719,17 @@ export const ApiTestSection = ({
           <Select
             className="w-full"
             id="testCredential"
-            value={state.credentialFilename}
-            onChange={onCredentialChange}
+            value={state.credentialFilename || FOLLOW_CURRENT_CREDENTIAL_VALUE}
+            onChange={(value) => {
+              onCredentialChange(
+                value === FOLLOW_CURRENT_CREDENTIAL_VALUE ? '' : String(value),
+              );
+            }}
             options={[
-              { label: text.apiTestFollowCurrent, value: '' },
+              {
+                label: text.apiTestFollowCurrent,
+                value: FOLLOW_CURRENT_CREDENTIAL_VALUE,
+              },
               ...credentialOptions.map((credential) => ({
                 label: `${credential.filename} · ${credential.email || credential.user_id}`,
                 value: credential.filename,
@@ -2692,6 +2850,11 @@ export const SettingsSection = ({
 }: SettingsSectionProps) => {
   const locale = useLocale() as AppLocale;
   const text = getLocalizedAdminText(locale);
+  const passkeyRpIdPlaceholder = {
+    'en-US': 'Leave empty to follow the current host',
+    'ja-JP': '空欄なら現在のホストに追従',
+    'zh-CN': '留空则跟随当前访问域名',
+  }[locale];
   return (
     <div id="settings" className="block">
       <Block direction="vertical" gap={16} padding={24} variant="outlined">
@@ -2710,6 +2873,11 @@ export const SettingsSection = ({
                 onChange={(value) => {
                   onChange(key, value);
                 }}
+                placeholder={
+                  key === 'CODEBUDDY_ADMIN_PASSKEY_RP_ID'
+                    ? passkeyRpIdPlaceholder
+                    : undefined
+                }
                 settingKey={key}
                 value={String(state.values[key] ?? '')}
               />
@@ -2747,17 +2915,18 @@ export const DebugSection = ({
   const locale = useLocale() as AppLocale;
   const text = getLocalizedAdminText(locale);
   const renderDebugBlock = (title: string, value: unknown) => {
-    const content = JSON.stringify(value, null, 2);
+    const content = JSON.stringify(value ?? null, null, 2);
     const singleLinePreview = content.replace(/\s+/g, ' ').trim() || 'null';
+    const sseEvents = parseSseEvents(value);
 
     return (
       <Block
         as="details"
-        className="w-full min-w-0 max-w-full overflow-hidden"
+        className="debug-payload w-full min-w-0 max-w-full"
         padding={12}
         variant="outlined"
       >
-        <summary className="list-none cursor-pointer p-3 flex items-start justify-between gap-3 w-full min-w-0 max-w-full overflow-hidden">
+        <summary className="debug-payload-summary list-none cursor-pointer p-3 flex items-start justify-between gap-3 w-full min-w-0 max-w-full">
           <div className="min-w-0 flex-1">
             <div className="font-medium text-text-light dark:text-text-dark mb-1">
               {title}
@@ -2778,19 +2947,66 @@ export const DebugSection = ({
             {text.debugCopy}
           </Button>
         </summary>
-        <pre className="w-full min-w-0 max-w-full overflow-hidden p-3 pt-0 whitespace-pre-wrap break-all text-xs text-text-light dark:text-text-dark">
-          {content}
-        </pre>
+        {sseEvents ? (
+          <div className="w-full min-w-0 max-w-full overflow-x-auto p-3 pt-0">
+            <table className="w-full min-w-[480px] border-collapse text-xs">
+              <thead>
+                <tr>
+                  <th className="p-3 text-left font-semibold border-b border-border-light dark:border-border-dark">
+                    {text.debugEventIndex}
+                  </th>
+                  <th className="p-3 text-left font-semibold border-b border-border-light dark:border-border-dark">
+                    {text.debugEventData}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {sseEvents.map((event, index) => {
+                  let eventContent = event;
+
+                  try {
+                    eventContent = JSON.stringify(JSON.parse(event), null, 2);
+                  } catch {
+                    eventContent = event;
+                  }
+
+                  return (
+                    <tr key={`${title}-${index}`}>
+                      <td className="p-3 align-top border-b border-border-light dark:border-border-dark text-secondary">
+                        {index + 1}
+                      </td>
+                      <td className="p-3 border-b border-border-light dark:border-border-dark">
+                        <pre className="whitespace-pre-wrap break-all text-text-light dark:text-text-dark">
+                          {eventContent}
+                        </pre>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <pre className="w-full min-w-0 max-w-full overflow-hidden p-3 pt-0 whitespace-pre-wrap break-all text-xs text-text-light dark:text-text-dark">
+            {content}
+          </pre>
+        )}
       </Block>
     );
   };
 
   return (
     <div id="debug" className="block">
-      <Block direction="vertical" gap={16} padding={24} variant="outlined">
-        <div className="flex items-center justify-between">
+      <Block
+        className="debug-section"
+        direction="vertical"
+        gap={16}
+        padding={24}
+        variant="outlined"
+      >
+        <div className="debug-section-header flex items-center justify-between">
           <SectionTitle icon={Info} title={text.debugSectionTitle} />
-          <div className="flex gap-2">
+          <div className="debug-section-actions flex gap-2">
             <div className="min-w-[160px]">
               <label className="sr-only" htmlFor="debugAutoRefreshSeconds">
                 {text.debugRefreshInterval}
@@ -2820,7 +3036,7 @@ export const DebugSection = ({
             </Button>
           </div>
         </div>
-        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px_auto] items-end mb-6">
+        <div className="debug-settings-grid grid gap-4 md:grid-cols-[minmax(0,1fr)_220px_auto] items-end mb-6">
           <ToggleOption
             checked={state.enabled}
             description={text.debugEnableHelp}
@@ -2867,11 +3083,11 @@ export const DebugSection = ({
               <Block
                 as="details"
                 key={item.id}
-                className="w-full min-w-0 max-w-full overflow-hidden"
+                className="debug-entry w-full min-w-0 max-w-full"
                 padding={16}
                 variant="outlined"
               >
-                <summary className="cursor-pointer list-none p-4 flex flex-wrap items-center justify-between gap-3 w-full min-w-0 max-w-full overflow-hidden">
+                <summary className="debug-entry-summary cursor-pointer list-none p-4 flex flex-wrap items-center justify-between gap-3 w-full min-w-0 max-w-full overflow-hidden">
                   <div className="min-w-0 flex-1">
                     <div className="font-medium text-text-light dark:text-text-dark">
                       {item.route}
@@ -2880,33 +3096,41 @@ export const DebugSection = ({
                       {item.createdAt} · key: {item.requestKey ?? 'none'}
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2 text-xs min-w-0 max-w-full">
-                    <Tag>
+                  <div className="debug-entry-tags flex flex-wrap gap-2 text-xs min-w-0 max-w-full">
+                    <Tag variant="borderless">
                       {text.debugUpstreamStatus(
                         item.upstreamResponse?.status ?? '-',
                       )}
                     </Tag>
-                    <Tag>
+                    <Tag variant="borderless">
                       {text.debugReturnedStatus(
                         item.transformedResponse?.status ?? '-',
                       )}
                     </Tag>
-                    {item.error ? <Tag color="red">{item.error}</Tag> : null}
+                    <Tag variant="borderless">
+                      {text.debugCredential}:{' '}
+                      {item.credentialFilename ?? text.debugCredentialUnknown}
+                    </Tag>
+                    {item.error ? (
+                      <Tag color="red" variant="borderless">
+                        {item.error}
+                      </Tag>
+                    ) : null}
                   </div>
                 </summary>
-                <div className="p-4 pt-0 grid gap-4 w-full min-w-0">
+                <div className="debug-entry-content p-4 pt-0 grid gap-4 w-full min-w-0">
                   {renderDebugBlock(text.debugRequest, item.requestBody)}
                   {renderDebugBlock(
                     text.debugUpstreamRequest,
-                    item.upstreamRequest,
+                    item.upstreamRequest?.body,
                   )}
                   {renderDebugBlock(
                     text.debugUpstreamResponse,
-                    item.upstreamResponse,
+                    item.upstreamResponse?.body,
                   )}
                   {renderDebugBlock(
                     text.debugResponse,
-                    item.transformedResponse,
+                    item.transformedResponse?.body,
                   )}
                 </div>
               </Block>

@@ -99,6 +99,10 @@ const getEmptyAdminAuthState = (): AdminAuthState => {
   };
 };
 
+const isAdminAuthStateDocument = (value: unknown): boolean => {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+};
+
 const normalizeAdminAuthState = (input: unknown): AdminAuthState => {
   if (!input || typeof input !== 'object') {
     return getEmptyAdminAuthState();
@@ -137,8 +141,13 @@ const loadAdminAuthStateAsync = async (): Promise<AdminAuthState> => {
     ADMIN_AUTH_KEY,
   );
 
-  if (result.error) {
-    throw new AdminAuthStorageError(result.error);
+  if (
+    result.error ||
+    (result.exists && !isAdminAuthStateDocument(result.value))
+  ) {
+    throw new AdminAuthStorageError(
+      result.error ?? 'Admin authentication document has an invalid shape',
+    );
   }
 
   return normalizeAdminAuthState(result.value);
@@ -410,9 +419,35 @@ const canRegisterAdminPasskeys = (request: RequestLike): boolean => {
   const hostname = getRequestHostname(request).toLowerCase();
 
   return (
-    getRequestProtocol(request) === 'https' &&
-    hostname !== 'localhost' &&
-    !hostname.endsWith('.localhost')
+    getRequestProtocol(request) === 'https' ||
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    hostname === '127.0.0.1' ||
+    hostname === '::1'
+  );
+};
+
+const getAdminPasskeyRegistrationError = async (
+  request: RequestLike,
+): Promise<Response | null> => {
+  const authError = await getAdminSessionErrorResponse(request);
+
+  if (authError) {
+    return authError;
+  }
+
+  if (await isAdminSessionAuthenticated(request)) {
+    return null;
+  }
+
+  return Response.json(
+    {
+      error: {
+        code: 'admin_auth_required',
+        message: 'Admin session required',
+      },
+    },
+    { status: 401 },
   );
 };
 
@@ -810,7 +845,7 @@ export const beginAdminPasskeyRegistration = async (
   request: RequestLike,
   name: string,
 ): Promise<Response> => {
-  const authError = await getAdminSessionErrorResponse(request);
+  const authError = await getAdminPasskeyRegistrationError(request);
 
   if (authError) {
     return authError;
@@ -820,7 +855,7 @@ export const beginAdminPasskeyRegistration = async (
     return Response.json(
       {
         error: {
-          message: 'Passkeys require an HTTPS, non-localhost origin',
+          message: 'Passkeys require HTTPS or a localhost origin',
         },
       },
       { status: 400 },
@@ -857,7 +892,7 @@ export const finishAdminPasskeyRegistration = async (
   responseBody: Record<string, unknown>,
   name: string,
 ): Promise<Response> => {
-  const authError = await getAdminSessionErrorResponse(request);
+  const authError = await getAdminPasskeyRegistrationError(request);
 
   if (authError) {
     return authError;
@@ -867,7 +902,7 @@ export const finishAdminPasskeyRegistration = async (
     return Response.json(
       {
         error: {
-          message: 'Passkeys require an HTTPS, non-localhost origin',
+          message: 'Passkeys require HTTPS or a localhost origin',
         },
       },
       { status: 400 },

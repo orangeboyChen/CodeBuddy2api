@@ -94,7 +94,7 @@ Then open `http://127.0.0.1:8001/`.
 
 The admin console uses stable routes and supports English, Japanese, and Simplified Chinese.
 
-- console route: `http://<host>:8001/admin`
+- console route: `http://<host>:8001/dashboard`
 - login route: `http://<host>:8001/login`
 - locale persistence: cookie-based, no locale path prefixes
 - mobile tab bar supports horizontal scrolling

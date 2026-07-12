@@ -16,6 +16,7 @@
     "statusValue": "{count} 件が有効",
     "tabsLabel": "管理ナビゲーション",
     "themeLabel": "テーマ",
+    "languageSystem": "システムに従う",
     "themeSystem": "システム",
     "themeLight": "ライト",
     "themeDark": "ダーク",
@@ -65,7 +66,7 @@
       "title": "サービス設定"
     },
     "securityPanel": {
-      "title": "管理者セキュリティ",
+      "title": "コンソールセキュリティ",
       "enabled": "認証は有効です。",
       "disabled": "認証は無効で、コンソールには直接アクセスできます。",
       "enable": "管理者認証を有効化",
@@ -76,7 +77,7 @@
       "confirmPassword": "パスワードの確認",
       "minimumPassword": "8 文字以上",
       "update": "管理者アカウントを更新",
-      "saveAndEnable": "保存して管理者認証を有効化",
+      "saveAndEnable": "保存",
       "disable": "管理者認証を無効化",
       "passkeyName": "Passkey 名 (任意)",
       "addPasskey": "Passkey を追加",

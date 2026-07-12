@@ -14,6 +14,7 @@ import {
 } from '../domain/credentials';
 import {
   enqueueUpstreamResponseSnapshot,
+  setDebugTraceCredential,
   setDebugTraceError,
   setDebugUpstreamRequest,
   type DebugTrace,
@@ -982,6 +983,7 @@ export const proxyChatCompletions = async (
 
   try {
     const resolvedContext = context ?? (await resolveProxyContext(request));
+    setDebugTraceCredential(debugTrace, resolvedContext.credentialFilename);
     const upstreamBody = await buildUpstreamBody(body, resolvedContext);
     const apiEndpoint = await getCodeBuddyApiEndpoint();
     const upstreamUrl = `${apiEndpoint}/v2/chat/completions`;
@@ -1093,6 +1095,7 @@ export const proxyResponsesUpstream = async (
 ): Promise<Response> => {
   try {
     const resolvedContext = context ?? (await resolveProxyContext(request));
+    setDebugTraceCredential(debugTrace, resolvedContext.credentialFilename);
     const upstreamBody = {
       ...body,
       model:

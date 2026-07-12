@@ -19,7 +19,13 @@ import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { themeAtom } from '@/app/admin/_components/admin-store';
 import { AdminHeader } from '@/app/_components/admin-header';
 import type { AdminLoginMessages } from '@/lib/i18n/messages';
-import { localeCookieName } from '@/lib/i18n/routing';
+import {
+  localeCookieName,
+  localePreferenceCookieName,
+  type LocalePreference,
+  parseLocalePreference,
+  systemLocalePreference,
+} from '@/lib/i18n/routing';
 import {
   resolvedThemeCookieName,
   themeChangeEventName,
@@ -55,6 +61,8 @@ interface LoginClientProps {
   initialTheme?: ThemeMode;
   initialSession: SessionSummary;
   locale: string;
+  localePreference?: LocalePreference;
+  systemLocaleLabel?: string;
   themeLabels?: Record<ThemeMode, string>;
   translations: Omit<AdminLoginMessages, 'usernameLabel'> & {
     usernameLabel?: string;
@@ -69,6 +77,8 @@ const LoginClient = ({
   initialSession,
   initialTheme = 'system',
   locale,
+  localePreference = parseLocalePreference(locale),
+  systemLocaleLabel = 'Follow system',
   themeLabels = { dark: 'Dark', light: 'Light', system: 'System' },
   translations,
 }: LoginClientProps) => {
@@ -76,7 +86,7 @@ const LoginClient = ({
   const [password, setPassword] = useState('');
   useHydrateAtoms([[themeAtom, initialTheme]]);
   const [theme, setTheme] = useAtom(themeAtom);
-  const [username, setUsername] = useState(initialSession.username ?? 'admin');
+  const [username, setUsername] = useState('');
   const [error, setError] = useState('');
   const [isPasskeyPending, setIsPasskeyPending] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -98,7 +108,11 @@ const LoginClient = ({
   );
 
   const changeLocale = (nextLocale: string) => {
-    document.cookie = `${localeCookieName}=${nextLocale}; Path=/; Max-Age=31536000; SameSite=Lax`;
+    document.cookie = `${localePreferenceCookieName}=${nextLocale}; Path=/; Max-Age=31536000; SameSite=Lax`;
+    document.cookie =
+      nextLocale === systemLocalePreference
+        ? `${localeCookieName}=; Path=/; Max-Age=0; SameSite=Lax`
+        : `${localeCookieName}=${nextLocale}; Path=/; Max-Age=31536000; SameSite=Lax`;
     window.location.reload();
   };
 
@@ -280,10 +294,12 @@ const LoginClient = ({
         brand="CodeBuddy2API"
         className="login-header"
         locale={locale}
+        localePreference={localePreference}
         onLocaleChange={changeLocale}
         onThemeChange={changeTheme}
         theme={theme}
         themeLabels={themeLabels}
+        systemLocaleLabel={systemLocaleLabel}
       />
       <Block
         as="section"

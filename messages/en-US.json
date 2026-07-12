@@ -16,6 +16,7 @@
     "statusValue": "{count} active",
     "tabsLabel": "Admin navigation",
     "themeLabel": "Theme",
+    "languageSystem": "Follow system",
     "themeSystem": "System",
     "themeLight": "Light",
     "themeDark": "Dark",
@@ -65,7 +66,7 @@
       "title": "Service settings"
     },
     "securityPanel": {
-      "title": "Administrator security",
+      "title": "Console security",
       "enabled": "Authentication is enabled.",
       "disabled": "Authentication is disabled; the console is publicly accessible.",
       "enable": "Enable administrator authentication",
@@ -76,7 +77,7 @@
       "confirmPassword": "Confirm password",
       "minimumPassword": "At least 8 characters",
       "update": "Update administrator account",
-      "saveAndEnable": "Save and enable administrator authentication",
+      "saveAndEnable": "Save",
       "disable": "Disable administrator authentication",
       "passkeyName": "Passkey name (optional)",
       "addPasskey": "Add passkey",

@@ -1,7 +1,8 @@
 'use client';
 
 import { startRegistration } from '@simplewebauthn/browser';
-import { Block, Button, Flexbox, Input } from '@lobehub/ui';
+import { Block, Flexbox, Input } from '@lobehub/ui';
+import { Button } from '@lobehub/ui/base-ui';
 import { Save, ShieldCheck } from 'lucide-react';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
@@ -36,9 +37,11 @@ const getPasskeyOriginSupport = () => {
   const hostname = window.location.hostname.toLowerCase();
 
   return (
-    window.location.protocol === 'https:' &&
-    hostname !== 'localhost' &&
-    !hostname.endsWith('.localhost')
+    window.location.protocol === 'https:' ||
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    hostname === '127.0.0.1' ||
+    hostname === '::1'
   );
 };
 
@@ -70,7 +73,7 @@ const AdminAuthSettings = () => {
       disableFailed: 'Failed to disable administrator authentication.',
       passkeyAdded: 'Passkey added.',
       passkeyAddFailed: 'Failed to add passkey.',
-      passkeyUnavailable: 'Passkeys require an HTTPS, non-localhost origin.',
+      passkeyUnavailable: 'Passkeys require HTTPS or a localhost origin.',
       passkeyDeleted: 'Passkey deleted.',
       passkeyDeleteFailed: 'Failed to delete passkey.',
       passkeyOptionsFailed: 'Unable to create a passkey registration request.',
@@ -86,7 +89,7 @@ const AdminAuthSettings = () => {
       passkeyAdded: 'Passkey を追加しました。',
       passkeyAddFailed: 'Passkey の追加に失敗しました。',
       passkeyUnavailable:
-        'Passkey には HTTPS かつ localhost 以外のオリジンが必要です。',
+        'Passkey には HTTPS または localhost のオリジンが必要です。',
       passkeyDeleted: 'Passkey を削除しました。',
       passkeyDeleteFailed: 'Passkey の削除に失敗しました。',
       passkeyOptionsFailed: 'Passkey 登録リクエストを作成できませんでした。',
@@ -100,7 +103,7 @@ const AdminAuthSettings = () => {
       disableFailed: '关闭管理员鉴权失败。',
       passkeyAdded: 'Passkey 已添加。',
       passkeyAddFailed: 'Passkey 添加失败。',
-      passkeyUnavailable: 'Passkey 仅可在 HTTPS 的非 localhost 域名上添加。',
+      passkeyUnavailable: 'Passkey 仅可在 HTTPS 或 localhost 域名上添加。',
       passkeyDeleted: 'Passkey 已删除。',
       passkeyDeleteFailed: 'Passkey 删除失败。',
       passkeyOptionsFailed: '无法创建 Passkey 注册请求。',
@@ -334,6 +337,7 @@ const AdminAuthSettings = () => {
             icon={Save}
             onClick={() => void saveAccount()}
             htmlType="button"
+            type="primary"
           >
             {authEnabled
               ? translations('update')

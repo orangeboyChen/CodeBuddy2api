@@ -347,6 +347,8 @@ describe('debug and usage persistence', () => {
     });
     expect(filtered.tableRows).toHaveLength(1);
     expect(filtered.tableRows[0].model).toBe('gpt-5.5');
+    expect(filtered.callSeries[0].points).toHaveLength(24);
+    expect(filtered.tokenSeries[0].points).toHaveLength(24);
 
     expect(
       (

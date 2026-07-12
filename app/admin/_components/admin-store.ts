@@ -3,6 +3,19 @@ import { atom } from 'jotai';
 export type TabKey =
   'dashboard' | 'usage' | 'credentials' | 'api-test' | 'debug' | 'settings';
 
+export const adminTabPaths: Record<TabKey, string> = {
+  'api-test': '/api-test',
+  credentials: '/credentials',
+  dashboard: '/dashboard',
+  debug: '/debug',
+  settings: '/settings',
+  usage: '/usage',
+};
+
+export const isTabKey = (value: string): value is TabKey => {
+  return value in adminTabPaths;
+};
+
 export type ThemeMode = 'light' | 'dark' | 'system';
 
 export interface AdminSessionState {
@@ -124,6 +137,7 @@ export interface ApiTestState {
 }
 
 export interface DebugLogEntry {
+  credentialFilename: string | null;
   createdAt: string;
   error: string | null;
   id: string;

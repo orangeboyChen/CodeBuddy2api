@@ -2,11 +2,15 @@
 
 import { Block, Button, Flexbox, Text } from '@lobehub/ui';
 import { DropdownMenu, Select } from '@lobehub/ui/base-ui';
-import { Languages, Menu, Monitor, Moon, Sun } from 'lucide-react';
+import { Languages, Menu, SunMoon } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import type { ThemeMode } from '@/app/admin/_components/admin-store';
-import { locales } from '@/lib/i18n/routing';
+import {
+  locales,
+  type LocalePreference,
+  systemLocalePreference,
+} from '@/lib/i18n/routing';
 
 const localeLabels: Record<string, string> = {
   'en-US': 'English',
@@ -19,8 +23,10 @@ interface AdminHeaderProps {
   brand: string;
   className: string;
   locale: string;
+  localePreference: LocalePreference;
   onLocaleChange: (locale: string) => void;
   onThemeChange: (theme: ThemeMode) => void;
+  systemLocaleLabel: string;
   theme: ThemeMode;
   themeLabels: Record<ThemeMode, string>;
 }
@@ -34,9 +40,9 @@ export const AdminHeader = ({
   onThemeChange,
   theme,
   themeLabels,
+  localePreference,
+  systemLocaleLabel,
 }: AdminHeaderProps) => {
-  const ThemeIcon = theme === 'dark' ? Moon : theme === 'light' ? Sun : Monitor;
-
   return (
     <Block
       as="header"
@@ -60,15 +66,18 @@ export const AdminHeader = ({
           <Select
             aria-label="Language"
             onChange={onLocaleChange}
-            options={locales.map((item) => ({
-              label: localeLabels[item] ?? item,
-              value: item,
-            }))}
-            value={locale}
+            options={[
+              { label: systemLocaleLabel, value: systemLocalePreference },
+              ...locales.map((item) => ({
+                label: localeLabels[item] ?? item,
+                value: item,
+              })),
+            ]}
+            value={localePreference}
           />
         </label>
         <label className="admin-header-select">
-          <ThemeIcon aria-hidden="true" size={16} strokeWidth={2} />
+          <SunMoon aria-hidden="true" size={16} strokeWidth={2} />
           <Select
             aria-label="Theme mode"
             onChange={(value) => onThemeChange(value as ThemeMode)}
@@ -86,14 +95,24 @@ export const AdminHeader = ({
         <DropdownMenu
           items={[
             {
-              children: locales.map((item) => ({
-                key: item,
-                label: localeLabels[item] ?? item,
-                onClick: () => onLocaleChange(item),
-              })),
+              children: [
+                {
+                  key: systemLocalePreference,
+                  label: systemLocaleLabel,
+                  onClick: () => onLocaleChange(systemLocalePreference),
+                },
+                ...locales.map((item) => ({
+                  key: item,
+                  label: localeLabels[item] ?? item,
+                  onClick: () => onLocaleChange(item),
+                })),
+              ],
               icon: Languages,
               key: 'locale',
-              label: localeLabels[locale] ?? locale,
+              label:
+                localePreference === systemLocalePreference
+                  ? systemLocaleLabel
+                  : (localeLabels[localePreference] ?? locale),
               type: 'submenu',
             },
             {
@@ -114,7 +133,7 @@ export const AdminHeader = ({
                   onClick: () => onThemeChange('system'),
                 },
               ],
-              icon: ThemeIcon,
+              icon: SunMoon,
               key: 'theme',
               label: themeLabels[theme],
               type: 'submenu',

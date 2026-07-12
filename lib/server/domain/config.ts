@@ -37,8 +37,7 @@ const SETTING_LABELS_BY_LOCALE: Record<
 > = {
   'en-US': {
     CODEBUDDY_API_ENDPOINT: 'CodeBuddy API endpoint',
-    CODEBUDDY_ADMIN_PASSKEY_RP_ID:
-      'Admin passkey RP ID / domain (leave empty to follow the current host)',
+    CODEBUDDY_ADMIN_PASSKEY_RP_ID: 'Admin passkey RP ID / domain',
     CODEBUDDY_AUTH_MODE: 'Authentication mode (auto/token)',
     CODEBUDDY_INTERNET_ENVIRONMENT: 'Network environment (internal/ioa/public)',
     CODEBUDDY_LOG_LEVEL: 'Log level',
@@ -46,8 +45,7 @@ const SETTING_LABELS_BY_LOCALE: Record<
   },
   'ja-JP': {
     CODEBUDDY_API_ENDPOINT: 'CodeBuddy API エンドポイント',
-    CODEBUDDY_ADMIN_PASSKEY_RP_ID:
-      '管理者 passkey RP ID / ドメイン (空欄なら現在のホストに追従)',
+    CODEBUDDY_ADMIN_PASSKEY_RP_ID: '管理者 passkey RP ID / ドメイン',
     CODEBUDDY_AUTH_MODE: '認証モード (auto/token)',
     CODEBUDDY_INTERNET_ENVIRONMENT: 'ネットワーク環境 (internal/ioa/public)',
     CODEBUDDY_LOG_LEVEL: 'ログレベル',
@@ -55,8 +53,7 @@ const SETTING_LABELS_BY_LOCALE: Record<
   },
   'zh-CN': {
     CODEBUDDY_API_ENDPOINT: 'CodeBuddy 官方 API 端点',
-    CODEBUDDY_ADMIN_PASSKEY_RP_ID:
-      '管理员 Passkey RP ID / 域名（留空则跟随当前访问域名）',
+    CODEBUDDY_ADMIN_PASSKEY_RP_ID: '管理员 Passkey RP ID / 域名',
     CODEBUDDY_AUTH_MODE: '认证模式 (auto/token)',
     CODEBUDDY_INTERNET_ENVIRONMENT: '网络环境 (internal/ioa/public)',
     CODEBUDDY_LOG_LEVEL: '日志级别',

@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen } from '@testing-library/react';
+import { ConfigProvider } from '@lobehub/ui';
+import { motion } from 'motion/react';
 import { NextIntlClientProvider } from 'next-intl';
 
 import {
@@ -11,9 +13,11 @@ import { getMessages } from '@/lib/i18n/messages';
 
 const renderWithMessages = (children: React.ReactNode) => {
   return render(
-    <NextIntlClientProvider locale="en-US" messages={getMessages('en-US')}>
-      {children}
-    </NextIntlClientProvider>,
+    <ConfigProvider motion={motion}>
+      <NextIntlClientProvider locale="en-US" messages={getMessages('en-US')}>
+        {children}
+      </NextIntlClientProvider>
+    </ConfigProvider>,
   );
 };
 

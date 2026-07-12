@@ -6,12 +6,14 @@ import { cookies, headers } from 'next/headers';
 
 import './globals.scss';
 import LobeUiProvider from '@/app/_components/lobe-ui-provider';
+import LobeStyleRegistry from '@/app/_components/lobe-style-registry';
 import { resolveThemeMode, resolvedThemeCookieName } from '@/lib/theme';
 import {
-  defaultLocale,
   localeCookieName,
-  locales,
-  type AppLocale,
+  localePreferenceCookieName,
+  parseLocalePreference,
+  resolveAppLocale,
+  systemLocalePreference,
 } from '@/lib/i18n/routing';
 import { getMessages } from '@/lib/i18n/messages';
 
@@ -20,41 +22,20 @@ export const metadata: Metadata = {
   description: 'Next.js admin shell for the CodeBuddy2API migration.',
 };
 
-const resolveLocale = (value: string | undefined): AppLocale => {
-  if (locales.includes(value as AppLocale)) {
-    return value as AppLocale;
-  }
-
-  const acceptedLanguages = value?.split(',') ?? [];
-
-  for (const entry of acceptedLanguages) {
-    const language = entry.split(';')[0]?.trim();
-
-    if (language === 'ja' || language === 'ja-JP') {
-      return 'ja-JP';
-    }
-
-    if (language === 'en' || language === 'en-US') {
-      return 'en-US';
-    }
-
-    if (language === 'zh' || language === 'zh-CN') {
-      return 'zh-CN';
-    }
-  }
-
-  return defaultLocale;
-};
-
 const RootLayout = async ({
   children,
 }: Readonly<{
   children: ReactNode;
 }>) => {
   const [cookieStore, headerStore] = await Promise.all([cookies(), headers()]);
-  const requestedLocale = cookieStore.get(localeCookieName)?.value;
-  const locale = resolveLocale(
-    requestedLocale ?? headerStore.get('accept-language') ?? undefined,
+  const localePreference = parseLocalePreference(
+    cookieStore.get(localePreferenceCookieName)?.value ??
+      cookieStore.get(localeCookieName)?.value,
+  );
+  const locale = resolveAppLocale(
+    localePreference === systemLocalePreference
+      ? (headerStore.get('accept-language') ?? undefined)
+      : localePreference,
   );
   const messages = getMessages(locale);
   const theme = resolveThemeMode(
@@ -70,11 +51,13 @@ const RootLayout = async ({
     >
       <body>
         <AntdRegistry>
-          <LobeUiProvider initialTheme={theme}>
-            <NextIntlClientProvider locale={locale} messages={messages}>
-              {children}
-            </NextIntlClientProvider>
-          </LobeUiProvider>
+          <LobeStyleRegistry>
+            <LobeUiProvider initialTheme={theme}>
+              <NextIntlClientProvider locale={locale} messages={messages}>
+                {children}
+              </NextIntlClientProvider>
+            </LobeUiProvider>
+          </LobeStyleRegistry>
         </AntdRegistry>
       </body>
     </html>

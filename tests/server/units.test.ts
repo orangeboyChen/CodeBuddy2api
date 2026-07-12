@@ -613,9 +613,7 @@ describe('server units', () => {
         totalTokens: 15,
       },
     ]);
-    expect(analytics.tokenSeries[0]?.points).toHaveLength(
-      new Date('2026-07-11T12:30:00.000Z').getHours() + 1,
-    );
+    expect(analytics.tokenSeries[0]?.points).toHaveLength(24);
 
     await clearUsageHistory();
     expect(
@@ -803,6 +801,17 @@ describe('server units', () => {
     ).toBe(503);
 
     fs.writeFileSync(path.join(tempDataDir, 'access-keys.json'), '');
+    expect(
+      (
+        await getClientAuthErrorResponse(
+          makeNextRequest('http://localhost/test', {
+            headers: { authorization: 'Bearer anything' },
+          }),
+        )
+      )?.status,
+    ).toBe(503);
+
+    fs.writeFileSync(path.join(tempDataDir, 'access-keys.json'), 'null');
     expect(
       (
         await getClientAuthErrorResponse(

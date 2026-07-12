@@ -124,12 +124,22 @@ const readAccessKeyStoreState = async (): Promise<AccessKeyStoreState> => {
     };
   }
 
-  if (!parsed && !parsedResult.exists) {
+  if (!parsedResult.exists) {
     return { changed: false, kind: 'missing', store: { accessKeys: [] } };
   }
 
-  if (!parsed) {
-    return { changed: false, kind: 'ok', store: { accessKeys: [] } };
+  if (
+    !parsed ||
+    typeof parsed !== 'object' ||
+    Array.isArray(parsed) ||
+    !Array.isArray(parsed.accessKeys)
+  ) {
+    return {
+      changed: false,
+      error: 'Access key store has an invalid shape',
+      kind: 'error',
+      store: { accessKeys: [] },
+    };
   }
 
   try {

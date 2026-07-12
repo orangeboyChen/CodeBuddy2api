@@ -1,14 +1,17 @@
 'use client';
 
-import { useCallback, useEffect, useRef } from 'react';
-import { useAtom } from 'jotai';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { createStore, Provider, useAtom } from 'jotai';
 import { useHydrateAtoms } from 'jotai/utils';
 import { useLocale, useTranslations } from 'next-intl';
+import { useRouter } from 'next/navigation';
+import type { Route } from 'next';
 import { Button } from '@lobehub/ui';
 import { ToastHost, toast } from '@lobehub/ui/base-ui';
 import { LogOut } from 'lucide-react';
 
 import {
+  createApiTestState,
   createCredentialsState,
   createDebugState,
   createDashboardState,
@@ -26,7 +29,7 @@ import {
   UsageSection,
 } from '@/app/admin/_components/admin-sections';
 import {
-  activeTabAtom,
+  adminTabPaths,
   adminSessionAtom,
   apiTestStateAtom,
   authStateAtom,
@@ -43,6 +46,7 @@ import {
   defaultDashboardState,
   defaultSettingsState,
   defaultUsageState,
+  type TabKey,
   settingsStateAtom,
   themeAtom,
   type ThemeMode,
@@ -58,7 +62,12 @@ import {
   themeChangeEventName,
   themeCookieName,
 } from '@/lib/theme';
-import { localeCookieName } from '@/lib/i18n/routing';
+import {
+  localeCookieName,
+  localePreferenceCookieName,
+  type LocalePreference,
+  systemLocalePreference,
+} from '@/lib/i18n/routing';
 
 interface HealthResponse {
   status?: string;
@@ -149,6 +158,9 @@ interface DebugResponse {
 
 interface ApiTestSuccess {
   choices?: Array<{
+    delta?: {
+      content?: unknown;
+    };
     message?: {
       content?: unknown;
     };
@@ -231,15 +243,43 @@ const formatResult = (payload: unknown) => {
   }
 };
 
+const getSseEventContent = (event: string) => {
+  const data = event
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice('data:'.length).trim())
+    .join('\n');
+
+  if (!data || data === '[DONE]') {
+    return '';
+  }
+
+  try {
+    const payload = JSON.parse(data) as ApiTestSuccess;
+    const content =
+      payload.choices?.[0]?.delta?.content ??
+      payload.choices?.[0]?.message?.content;
+
+    return typeof content === 'string' ? content : '';
+  } catch {
+    return data;
+  }
+};
+
 interface AdminConsoleProps {
   initialData?: AdminConsoleInitialData;
+  initialLocalePreference: LocalePreference;
+  initialTab: TabKey;
   initialTheme?: ThemeMode;
 }
 
-const AdminConsole = ({
+const AdminConsoleContent = ({
   initialData,
+  initialLocalePreference,
+  initialTab,
   initialTheme = 'system',
 }: AdminConsoleProps) => {
+  const router = useRouter();
   const initialDashboardState = initialData
     ? createDashboardState(initialData)
     : defaultDashboardState;
@@ -255,6 +295,9 @@ const AdminConsole = ({
   const initialSettingsState = initialData
     ? createSettingsState(initialData)
     : defaultSettingsState;
+  const initialApiTestState = initialData
+    ? createApiTestState(initialData)
+    : defaultApiTestState;
 
   useHydrateAtoms([
     [dashboardStateAtom, initialDashboardState],
@@ -263,11 +306,10 @@ const AdminConsole = ({
     [usageStateAtom, initialUsageState],
     [settingsStateAtom, initialSettingsState],
     [authStateAtom, defaultAuthState],
-    [apiTestStateAtom, defaultApiTestState],
+    [apiTestStateAtom, initialApiTestState],
     [themeAtom, initialTheme],
   ]);
 
-  const [activeTab, setActiveTab] = useAtom(activeTabAtom);
   const [theme, setTheme] = useAtom(themeAtom);
   const [dashboard, setDashboard] = useAtom(dashboardStateAtom);
   const [credentials, setCredentials] = useAtom(credentialsStateAtom);
@@ -277,6 +319,7 @@ const AdminConsole = ({
   const [apiTest, setApiTest] = useAtom(apiTestStateAtom);
   const [settings, setSettings] = useAtom(settingsStateAtom);
   const [adminSession, setAdminSession] = useAtom(adminSessionAtom);
+  const activeTab = initialTab;
   const locale = useLocale();
   const translations = useTranslations('Admin');
   const consoleText = {
@@ -498,7 +541,6 @@ const AdminConsole = ({
   const debugAutoRefreshTimerRef = useRef<number | null>(null);
   const usageAutoRefreshTimerRef = useRef<number | null>(null);
   const usageRequestRef = useRef(usage.request);
-
   const showNotification = useCallback(
     (type: 'success' | 'error' | 'warning' | 'info', message: string) => {
       toast[type]({ description: message, duration: 3000 });
@@ -548,13 +590,17 @@ const AdminConsole = ({
       ? (validCredentials / items.length) * 100
       : 0;
 
+    const checkedAt = `${consoleText.serviceCheckedAt} ${new Date(
+      healthResult.data?.timestamp ?? new Date().toISOString(),
+    ).toLocaleString(locale)}`;
+
     setDashboard({
       apiEndpoint: buildApiEndpoint(),
       credentialUsage: Object.entries(
         statsResult.data?.credential_usage ?? {},
       ).sort((left, right) => right[1] - left[1]),
       credentialUsagePercent,
-      lastCheckedAt: new Date().toLocaleTimeString(locale),
+      lastCheckedAt: checkedAt,
       loading: false,
       modelUsage: Object.entries(statsResult.data?.model_usage ?? {}).sort(
         (left, right) => right[1] - left[1],
@@ -565,11 +611,7 @@ const AdminConsole = ({
         : consoleText.serviceUnavailable,
       totalApiCalls,
       totalCredentials: items.length,
-      uptimeText: healthResult.data?.timestamp
-        ? `${consoleText.serviceCheckedAt} ${new Date(
-            healthResult.data.timestamp,
-          ).toLocaleString(locale)}`
-        : `${consoleText.serviceCheckedAt} ${new Date().toLocaleString(locale)}`,
+      uptimeText: checkedAt,
       validCredentials,
     });
   }, [
@@ -922,7 +964,7 @@ const AdminConsole = ({
     if (result.data?.error === 'authorization_pending') {
       setAuth((current) => ({
         ...current,
-        message: result.data?.error_description ?? consoleText.authPending,
+        message: consoleText.authPending,
         polling: false,
       }));
       authPollTimerRef.current = window.setTimeout(() => {
@@ -979,7 +1021,7 @@ const AdminConsole = ({
       authUrl: result.data?.verification_uri_complete ?? '',
       completed: false,
       intervalSeconds: result.data?.interval ?? 5,
-      message: result.data?.message ?? consoleText.authStarted,
+      message: consoleText.authStarted,
       starting: false,
     }));
     showNotification('success', consoleText.authCreated);
@@ -1297,9 +1339,9 @@ const AdminConsole = ({
       },
       method: 'POST',
     });
-    const text = await response.text();
-
     if (!response.ok) {
+      const text = await response.text();
+
       try {
         const payload = JSON.parse(text) as Record<string, unknown>;
 
@@ -1323,6 +1365,46 @@ const AdminConsole = ({
         return;
       }
     }
+
+    if (apiTest.stream && response.body) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffered = '';
+      let streamedResult = '';
+      let done = false;
+
+      while (!done) {
+        const next = await reader.read();
+        done = next.done;
+        buffered += decoder.decode(next.value, { stream: !done });
+        const events = buffered.split(/\r?\n\r?\n/);
+        buffered = events.pop() ?? '';
+        const nextContent = events.map(getSseEventContent).join('');
+
+        if (nextContent) {
+          streamedResult += nextContent;
+          setApiTest((current) => ({
+            ...current,
+            result: streamedResult,
+          }));
+        }
+      }
+
+      const finalContent = getSseEventContent(buffered);
+
+      if (finalContent) {
+        streamedResult += finalContent;
+      }
+
+      setApiTest((current) => ({
+        ...current,
+        result: streamedResult || consoleText.requestIdle,
+        submitting: false,
+      }));
+      return;
+    }
+
+    const text = await response.text();
 
     try {
       const payload = JSON.parse(text) as ApiTestSuccess;
@@ -1492,8 +1574,6 @@ const AdminConsole = ({
         loadUsage(),
         loadSettings(),
       ]);
-    } else if (!initialData.usage) {
-      void loadUsage();
     }
 
     return () => {
@@ -1502,6 +1582,7 @@ const AdminConsole = ({
       clearUsageTimer();
     };
   }, [
+    activeTab,
     clearDebugAutoRefreshTimer,
     initialData,
     loadCredentials,
@@ -1510,21 +1591,6 @@ const AdminConsole = ({
     loadSettings,
     loadUsage,
   ]);
-
-  useEffect(() => {
-    const storedTab = window.localStorage.getItem('codebuddy2api-admin-tab');
-
-    if (
-      storedTab === 'dashboard' ||
-      storedTab === 'usage' ||
-      storedTab === 'credentials' ||
-      storedTab === 'api-test' ||
-      storedTab === 'debug' ||
-      storedTab === 'settings'
-    ) {
-      setActiveTab(storedTab);
-    }
-  }, [setActiveTab]);
 
   useEffect(() => {
     void fetch('/admin-api/auth/session')
@@ -1573,7 +1639,11 @@ const AdminConsole = ({
   }, [theme]);
 
   const changeLocale = (nextLocale: string) => {
-    document.cookie = `${localeCookieName}=${nextLocale}; Path=/; Max-Age=31536000; SameSite=Lax`;
+    document.cookie = `${localePreferenceCookieName}=${nextLocale}; Path=/; Max-Age=31536000; SameSite=Lax`;
+    document.cookie =
+      nextLocale === systemLocalePreference
+        ? `${localeCookieName}=; Path=/; Max-Age=0; SameSite=Lax`
+        : `${localeCookieName}=${nextLocale}; Path=/; Max-Age=31536000; SameSite=Lax`;
     window.location.reload();
   };
 
@@ -1589,10 +1659,6 @@ const AdminConsole = ({
 
     showNotification('error', translations('logoutUnavailable'));
   };
-
-  useEffect(() => {
-    window.localStorage.setItem('codebuddy2api-admin-tab', activeTab);
-  }, [activeTab]);
 
   useEffect(() => {
     clearDebugAutoRefreshTimer();
@@ -1650,6 +1716,7 @@ const AdminConsole = ({
           brand={translations('brand')}
           className="console-header"
           locale={locale}
+          localePreference={initialLocalePreference}
           onLocaleChange={changeLocale}
           onThemeChange={setTheme}
           theme={theme}
@@ -1658,9 +1725,15 @@ const AdminConsole = ({
             light: translations('themeLight'),
             system: translations('themeSystem'),
           }}
+          systemLocaleLabel={translations('languageSystem')}
         />
         <main className="console-main">
-          <TabNav activeTab={activeTab} onChange={setActiveTab} />
+          <TabNav
+            activeTab={activeTab}
+            onChange={(nextTab) => {
+              router.push(adminTabPaths[nextTab] as Route);
+            }}
+          />
           {activeTab === 'dashboard' ? (
             <DashboardSection
               onCopyEndpoint={() => {
@@ -1986,6 +2059,16 @@ const AdminConsole = ({
       </div>
       <ToastHost duration={3000} position="top-right" />
     </>
+  );
+};
+
+const AdminConsole = (props: AdminConsoleProps) => {
+  const store = useMemo(() => createStore(), []);
+
+  return (
+    <Provider store={store}>
+      <AdminConsoleContent {...props} />
+    </Provider>
   );
 };
 

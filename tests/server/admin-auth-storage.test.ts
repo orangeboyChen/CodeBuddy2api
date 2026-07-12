@@ -283,6 +283,16 @@ describe('admin auth and storage', () => {
     ).toBe(503);
   });
 
+  it('fails closed when the admin auth document has an invalid shape', async () => {
+    fs.mkdirSync(tempDataDir, { recursive: true });
+    fs.writeFileSync(path.join(tempDataDir, 'admin-auth.json'), 'null');
+
+    expect(
+      (await getAdminSessionErrorResponse(makeRequest('/admin-api/settings')))
+        ?.status,
+    ).toBe(503);
+  });
+
   it('covers passkey auth guard branches and rp id resolution through config storage', async () => {
     const noPasskeyResponse = await beginAdminPasskeyAuthentication(
       makeRequest('/admin-api/auth/passkeys/authentication/options'),
@@ -320,6 +330,14 @@ describe('admin auth and storage', () => {
       'Named key',
     );
     expect(unauthenticatedRegistration.status).toBe(401);
+
+    const localhostRegistration = await beginAdminPasskeyRegistration(
+      makeRequest('/admin-api/auth/passkeys/registration/options', {
+        cookie: setupCookie,
+      }),
+      'Local key',
+    );
+    expect(localhostRegistration.status).toBe(200);
   });
 
   it('covers file storage read write list delete and metadata helpers', async () => {

@@ -1,33 +1,34 @@
 import { headers } from 'next/headers';
 import { cookies } from 'next/headers';
 import { getTranslations } from 'next-intl/server';
-import { defaultLocale, localeCookieName, locales } from '@/lib/i18n/routing';
 import { redirect } from 'next/navigation';
 
 import LoginClient from '@/features/admin/login-client';
 import { getAdminSessionSummary } from '@/lib/server/admin/session';
 import { getMessages } from '@/lib/i18n/messages';
-import type { AppLocale } from '@/lib/i18n/routing';
+import {
+  localeCookieName,
+  localePreferenceCookieName,
+  parseLocalePreference,
+  resolveAppLocale,
+  systemLocalePreference,
+} from '@/lib/i18n/routing';
 import { parseThemeMode, themeCookieName } from '@/lib/theme';
 
 export const dynamic = 'force-dynamic';
 
-const resolveLoginLocale = async (): Promise<AppLocale> => {
-  const cookieStore = await cookies();
-  const locale = cookieStore.get(localeCookieName)?.value;
-  const matchedLocale = locales.find((item) => item === locale);
-
-  if (matchedLocale) {
-    return matchedLocale;
-  }
-
-  return defaultLocale;
-};
-
 const LoginPage = async () => {
   const headerStore = await headers();
   const cookieStore = await cookies();
-  const locale = await resolveLoginLocale();
+  const localePreference = parseLocalePreference(
+    cookieStore.get(localePreferenceCookieName)?.value ??
+      cookieStore.get(localeCookieName)?.value,
+  );
+  const locale = resolveAppLocale(
+    localePreference === systemLocalePreference
+      ? (headerStore.get('accept-language') ?? undefined)
+      : localePreference,
+  );
   const protocol = headerStore.get('x-forwarded-proto') ?? 'http';
   const host =
     headerStore.get('x-forwarded-host') ??
@@ -53,6 +54,8 @@ const LoginPage = async () => {
       initialSession={session}
       initialTheme={parseThemeMode(cookieStore.get(themeCookieName)?.value)}
       locale={locale}
+      localePreference={localePreference}
+      systemLocaleLabel={messages.Admin.languageSystem}
       themeLabels={{
         dark: messages.Admin.themeDark,
         light: messages.Admin.themeLight,

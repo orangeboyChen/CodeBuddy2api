@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { readStorageJson, writeStorageJson } from '../storage';
 
 export interface DebugLogEntry {
+  credentialFilename: string | null;
   createdAt: string;
   error: string | null;
   id: string;
@@ -27,6 +28,7 @@ export interface DebugSettings {
 }
 
 export interface DebugTrace {
+  credentialFilename: string | null;
   createdAt: string;
   error: string | null;
   id: string;
@@ -326,6 +328,7 @@ export const createDebugTrace = ({
   route: string;
 }): DebugTrace => {
   return {
+    credentialFilename: null,
     createdAt: new Date().toISOString(),
     error: null,
     id: crypto.randomUUID(),
@@ -340,6 +343,17 @@ export const createDebugTrace = ({
     upstreamRequest: null,
     upstreamResponse: null,
   };
+};
+
+export const setDebugTraceCredential = (
+  trace: DebugTrace | undefined,
+  credentialFilename: string | null,
+): void => {
+  if (!trace) {
+    return;
+  }
+
+  trace.credentialFilename = credentialFilename;
 };
 
 export const setDebugTraceError = (
@@ -435,6 +449,7 @@ export const finalizeDebugTrace = (
     })
     .finally(() => {
       void appendDebugLog({
+        credentialFilename: trace.credentialFilename,
         createdAt: trace.createdAt,
         error: trace.error,
         id: trace.id,

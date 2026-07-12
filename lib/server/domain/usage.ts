@@ -79,6 +79,7 @@ export interface UsageAnalyticsResponse {
 const USAGE_NAMESPACE = 'usage';
 const USAGE_STORE_KEY = 'history';
 const MAX_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const FIVE_MINUTES_MS = 5 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 let usageMutationQueue: Promise<void> = Promise.resolve();
@@ -237,15 +238,26 @@ const getRangeWindow = (
 } => {
   const nowMs = now.getTime();
 
+  const rollingWindows: Partial<
+    Record<UsageRange, { bucketCount: number; bucketSizeMs: number }>
+  > = {
+    '1h': { bucketCount: 12, bucketSizeMs: FIVE_MINUTES_MS },
+    '3h': { bucketCount: 12, bucketSizeMs: 15 * 60 * 1000 },
+    '6h': { bucketCount: 12, bucketSizeMs: 30 * 60 * 1000 },
+    '12h': { bucketCount: 12, bucketSizeMs: HOUR_MS },
+    '24h': { bucketCount: 24, bucketSizeMs: HOUR_MS },
+  };
+
   if (range === 'today') {
     const start = new Date(now);
     start.setHours(0, 0, 0, 0);
-    const elapsedHours = Math.floor((nowMs - start.getTime()) / HOUR_MS) + 1;
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
 
     return {
-      bucketCount: elapsedHours,
+      bucketCount: 24,
       bucketSizeMs: HOUR_MS,
-      endMs: nowMs + 1,
+      endMs: end.getTime(),
       startMs: start.getTime(),
     };
   }
@@ -265,22 +277,36 @@ const getRangeWindow = (
     };
   }
 
-  const bucketSizeMs = range === '3d' || range === '7d' ? DAY_MS : HOUR_MS;
-  const bucketCount = {
-    '1h': 1,
-    '3h': 3,
-    '6h': 6,
-    '12h': 12,
-    '24h': 24,
-    '3d': 3,
-    '7d': 7,
-  }[range];
+  if (range === '3d' || range === '7d') {
+    const bucketCount = range === '3d' ? 3 : 7;
+    const currentDay = new Date(now);
+    currentDay.setHours(0, 0, 0, 0);
+    const endMs = currentDay.getTime() + DAY_MS;
+
+    return {
+      bucketCount,
+      bucketSizeMs: DAY_MS,
+      endMs,
+      startMs: endMs - bucketCount * DAY_MS,
+    };
+  }
+
+  const rollingWindow = rollingWindows[range];
+
+  if (!rollingWindow) {
+    throw new Error(`Unsupported usage range: ${range}`);
+  }
+
+  const currentBucketStart =
+    Math.floor(nowMs / rollingWindow.bucketSizeMs) * rollingWindow.bucketSizeMs;
 
   return {
-    bucketCount,
-    bucketSizeMs,
-    endMs: nowMs + 1,
-    startMs: nowMs - bucketCount * bucketSizeMs + 1,
+    bucketCount: rollingWindow.bucketCount,
+    bucketSizeMs: rollingWindow.bucketSizeMs,
+    endMs: currentBucketStart + rollingWindow.bucketSizeMs,
+    startMs:
+      currentBucketStart -
+      (rollingWindow.bucketCount - 1) * rollingWindow.bucketSizeMs,
   };
 };
 

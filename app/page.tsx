@@ -7,6 +7,7 @@ import type { AdminConsoleInitialData } from '@/app/admin/_components/admin-init
 import type {
   AccessKeySummary,
   CredentialSummary,
+  TabKey,
 } from '@/app/admin/_components/admin-store';
 import { listAccessKeys } from '@/lib/server/domain/access-keys';
 import {
@@ -22,9 +23,11 @@ import {
 import { getUsageStats } from '@/lib/server/domain/stats';
 import { getUsageAnalytics } from '@/lib/server/domain/usage';
 import {
-  defaultLocale,
   localeCookieName,
-  locales,
+  localePreferenceCookieName,
+  parseLocalePreference,
+  resolveAppLocale,
+  systemLocalePreference,
   type AppLocale,
 } from '@/lib/i18n/routing';
 import { parseThemeMode, themeCookieName } from '@/lib/theme';
@@ -42,12 +45,6 @@ const buildApiEndpoint = async () => {
   return `${protocol}://${host}/v1`;
 };
 
-const resolveLocale = (cookieValue: string | undefined): AppLocale => {
-  return locales.includes(cookieValue as AppLocale)
-    ? (cookieValue as AppLocale)
-    : defaultLocale;
-};
-
 const formatInitialHealthLabel = (locale: AppLocale, timestamp: string) => {
   const checkedAt = new Date(timestamp).toLocaleString(locale);
 
@@ -55,9 +52,9 @@ const formatInitialHealthLabel = (locale: AppLocale, timestamp: string) => {
     case 'en-US':
       return `Last checked ${checkedAt}`;
     case 'ja-JP':
-      return `最終確認: ${checkedAt}`;
+      return `最終確認 ${checkedAt}`;
     default:
-      return `最后检查于 ${checkedAt}`;
+      return `最后检查 ${checkedAt}`;
   }
 };
 
@@ -110,11 +107,14 @@ const getInitialData = async (
       values: { ...activeConfig },
     },
     stats,
-    usage,
+    usage: {
+      ...usage,
+      updatedAtLabel: new Date(timestamp).toLocaleTimeString(locale),
+    },
   };
 };
 
-const RootPage = async () => {
+export const renderAdminConsole = async (initialTab: TabKey) => {
   const cookieStore = await cookies();
   const headerStore = await headers();
   const protocol = headerStore.get('x-forwarded-proto') ?? 'http';
@@ -135,14 +135,28 @@ const RootPage = async () => {
     redirect('/login');
   }
 
-  const locale = resolveLocale(cookieStore.get(localeCookieName)?.value);
+  const localePreference = parseLocalePreference(
+    cookieStore.get(localePreferenceCookieName)?.value ??
+      cookieStore.get(localeCookieName)?.value,
+  );
+  const locale = resolveAppLocale(
+    localePreference === systemLocalePreference
+      ? (headerStore.get('accept-language') ?? undefined)
+      : localePreference,
+  );
 
   return (
     <AdminConsole
       initialData={await getInitialData(locale)}
+      initialLocalePreference={localePreference}
+      initialTab={initialTab}
       initialTheme={parseThemeMode(cookieStore.get(themeCookieName)?.value)}
     />
   );
+};
+
+const RootPage = () => {
+  redirect('/dashboard');
 };
 
 export default RootPage;
