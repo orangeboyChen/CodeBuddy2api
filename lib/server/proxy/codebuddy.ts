@@ -8,6 +8,7 @@ import {
 } from '../domain/config';
 import {
   type CredentialRecord,
+  findEligibleCredentialRecordByFilename,
   findCredentialRecordByFilename,
   getCredentialProxySettings,
   resolveCredentialForRequest,
@@ -416,12 +417,21 @@ export const createProxyContextFromCredential = (
 
 export const resolveProxyContextByCredentialFilename = async (
   filename: string,
-  accessKey?: {
-    id?: string | null;
-    name?: string | null;
+  options?: {
+    accessKey?: {
+      id?: string | null;
+      name?: string | null;
+    };
+    allowedCredentialFilenames?: string[];
+    requireEligible?: boolean;
   },
 ): Promise<ProxyContext> => {
-  const credential = await findCredentialRecordByFilename(filename);
+  const credential = options?.requireEligible
+    ? await findEligibleCredentialRecordByFilename(
+        filename,
+        options.allowedCredentialFilenames,
+      )
+    : await findCredentialRecordByFilename(filename);
 
   if (!credential) {
     throw new Error('Selected credential was not found');
@@ -429,8 +439,8 @@ export const resolveProxyContextByCredentialFilename = async (
 
   return {
     ...createProxyContextFromCredential(credential),
-    accessKeyId: accessKey?.id ?? null,
-    accessKeyName: accessKey?.name ?? null,
+    accessKeyId: options?.accessKey?.id ?? null,
+    accessKeyName: options?.accessKey?.name ?? null,
   };
 };
 

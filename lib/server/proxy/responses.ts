@@ -1373,30 +1373,41 @@ export const handleResponsesRequest = async (
   try {
     const previousResponseId = body.previous_response_id ?? null;
     const accessKey = await resolveRequestAccessKey(request);
-    const previousSession = getValidatedPreviousSession(
-      previousResponseId,
-      accessKey?.id ?? null,
-    );
+    const storedPreviousSession = previousResponseId
+      ? getResponseSession(previousResponseId)
+      : undefined;
 
     if (
-      previousSession?.credentialFilename &&
+      previousResponseId &&
+      storedPreviousSession &&
+      storedPreviousSession.accessKeyId !== (accessKey?.id ?? null)
+    ) {
+      throw new Error('Unknown or expired previous_response_id');
+    }
+
+    if (
+      storedPreviousSession?.credentialFilename &&
       accessKey?.credentialFilenames?.length &&
       !accessKey.credentialFilenames.includes(
-        previousSession.credentialFilename,
+        storedPreviousSession.credentialFilename,
       )
     ) {
       throw new Error('Unknown or expired previous_response_id');
     }
 
-    const proxyContext = previousSession?.credentialFilename
+    const proxyContext = storedPreviousSession?.credentialFilename
       ? await resolveProxyContextByCredentialFilename(
-          previousSession.credentialFilename,
-          accessKey
-            ? {
-                id: accessKey.id,
-                name: accessKey.name,
-              }
-            : undefined,
+          storedPreviousSession.credentialFilename,
+          {
+            accessKey: accessKey
+              ? {
+                  id: accessKey.id,
+                  name: accessKey.name,
+                }
+              : undefined,
+            allowedCredentialFilenames: accessKey?.credentialFilenames,
+            requireEligible: true,
+          },
         )
       : await resolveProxyContext(request);
 
@@ -1408,6 +1419,11 @@ export const handleResponsesRequest = async (
         debugTrace,
       );
     }
+
+    const previousSession = getValidatedPreviousSession(
+      previousResponseId,
+      accessKey?.id ?? null,
+    );
 
     const prepared = await prepareTranscript(
       body,

@@ -290,6 +290,18 @@ export const findCredentialRecordByFilename = async (
   );
 };
 
+export const findEligibleCredentialRecordByFilename = async (
+  filename: string,
+  allowedCredentialFilenames?: string[],
+): Promise<CredentialRecord | null> => {
+  return (
+    getEligibleRecords(
+      await readCredentialRecords(),
+      allowedCredentialFilenames,
+    ).find((record) => record.filename === filename) ?? null
+  );
+};
+
 const getCredentialExpiry = (credential: CredentialData): number | null => {
   if (
     typeof credential.created_at !== 'number' ||
