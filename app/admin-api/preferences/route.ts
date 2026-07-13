@@ -10,12 +10,19 @@ import { resolvedThemeCookieName, themeCookieName } from '@/lib/theme';
 import { getJsonBody } from '@/lib/server/shared/http';
 
 const maxAge = 60 * 60 * 24 * 365;
-const cookieOptions = {
-  httpOnly: true,
-  maxAge,
-  path: '/',
-  sameSite: 'lax' as const,
-  secure: true,
+
+const getCookieOptions = (request: Request) => {
+  const protocol =
+    request.headers.get('x-forwarded-proto') ??
+    new URL(request.url).protocol.replace(':', '');
+
+  return {
+    httpOnly: true,
+    maxAge,
+    path: '/',
+    sameSite: 'lax' as const,
+    secure: protocol === 'https',
+  };
 };
 
 export const runtime = 'nodejs';
@@ -28,6 +35,7 @@ export const POST = async (request: Request): Promise<Response> => {
     theme?: unknown;
   }>(request);
   const response = NextResponse.json({ success: true });
+  const cookieOptions = getCookieOptions(request);
 
   if (typeof body.localePreference === 'string') {
     const localePreference = body.localePreference;
