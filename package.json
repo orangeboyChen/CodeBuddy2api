@@ -28,14 +28,14 @@
     "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.45.2",
     "jotai": "^2.20.1",
-    "lucide-react": "^0.562.0",
+    "lucide-react": "^1.24.0",
     "motion": "^12.40.0",
     "next": "^16.2.10",
     "next-intl": "^4.13.2",
     "pg": "^8.22.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "zod": "^3.24.2"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.1",
@@ -62,7 +62,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "husky": "^9.1.7",
     "jiti": "^2.7.0",
-    "jsdom": "^26.0.0",
+    "jsdom": "^29.1.1",
     "lint-staged": "^17.0.8",
     "pg-mem": "^3.0.14",
     "postcss": "^8.5.16",
