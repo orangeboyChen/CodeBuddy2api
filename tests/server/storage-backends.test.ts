@@ -228,7 +228,9 @@ describe('storage backends', () => {
     );
 
     const ensureSchema = vi.fn(async () => undefined);
-    const getDocument = vi.fn(async () => null);
+    const getDocument = vi.fn(
+      async (): Promise<Record<string, unknown> | null> => null,
+    );
     const listDocuments = vi.fn(async (namespace: string) => {
       if (namespace === 'credentials') {
         return [
@@ -254,7 +256,7 @@ describe('storage backends', () => {
 
       return [];
     });
-    const putDocument = vi.fn(async () => undefined);
+    const putDocument = vi.fn(async (_input: unknown) => undefined);
     const deleteDocument = vi.fn(async () => undefined);
     const appendUsageEvents = vi.fn(async () => undefined);
     const listUsageEvents = vi.fn(async () => []);
@@ -342,6 +344,40 @@ describe('storage backends', () => {
         payload: { CODEBUDDY_AUTH_MODE: 'auto' },
       }),
     );
+
+    getDocument.mockResolvedValueOnce({
+      encryptedPayload: null,
+      encryptionMode: null,
+      key: 'serialized',
+      payload: '{"enabled":true}',
+    });
+    expect(await storage.readStorageJson('config', 'serialized')).toEqual({
+      enabled: true,
+    });
+
+    const encryptedCredential = putDocument.mock.calls
+      .map((call) => call[0] as Record<string, unknown>)
+      .find((input) => {
+        return input.key === 'cred-b.json';
+      });
+    getDocument.mockResolvedValueOnce({
+      encryptedPayload: encryptedCredential?.encryptedPayload ?? null,
+      encryptionMode: encryptedCredential?.encryptionMode ?? null,
+      key: 'cred-b.json',
+      payload: null,
+    });
+    expect(await storage.readStorageJson('credentials', 'cred-b.json')).toEqual(
+      {
+        bearer_token: 'token-b',
+      },
+    );
+
+    getDocument.mockRejectedValueOnce(new Error('database unavailable'));
+    expect(await storage.readStorageJsonResult('config', 'runtime')).toEqual({
+      error: 'database unavailable',
+      exists: true,
+      value: null,
+    });
 
     await expect(storage.listStorageJson('credentials')).rejects.toThrow(
       'Invalid authentication tag length',
