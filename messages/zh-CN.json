@@ -315,7 +315,7 @@
       "autofillAvailable": "当前浏览器支持 passkey 条件式自动填充，页面会自动尝试登录。",
       "autofillUnavailable": "已配置 passkey，但当前浏览器不支持条件式自动填充，请使用 passkey 按钮登录。",
       "continueWithPasskey": "使用 passkey 继续",
-      "continueWithPassword": "使用密码继续",
+      "continueWithPassword": "登录",
       "createAccountRedirecting": "管理员账户已创建，正在跳转...",
       "createPasswordLabel": "创建管理员密码",
       "createPasswordPlaceholder": "请输入高强度密码",
@@ -327,7 +327,7 @@
       "errorPasskeyFailed": "Passkey 登录失败，请重试或改用密码。",
       "errorPasskeyUnavailable": "当前无法使用 passkey 登录。",
       "errorPasswordStatus": "请输入管理员密码继续。",
-      "headingLogin": "登录管理控制台",
+      "headingLogin": "登录 CodeBuddy2API",
       "headingSetup": "设置管理员账户",
       "noPasskeysConfigured": "当前管理员账户还没有配置 passkey。",
       "orLabel": "或",
@@ -336,13 +336,13 @@
       "passkeyHintSetup": "设置成功后会立即为你登录。",
       "passkeyStatusManual": "正在打开 passkey 验证窗口...",
       "passwordAccepted": "密码验证通过，正在跳转...",
-      "passwordLabel": "管理员密码",
+      "passwordLabel": "密码",
       "passwordSignInHint": "请输入密码或使用已保存的 passkey 继续。",
       "signInWithPassword": "正在创建管理员账户...",
       "signingInPassword": "正在使用密码登录...",
       "title": "管理员登录",
       "waitingForPasskey": "正在等待已保存的 passkey...",
-      "usernameLabel": "管理员用户名"
+      "usernameLabel": "用户名"
     }
   }
 }

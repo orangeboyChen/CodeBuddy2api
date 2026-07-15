@@ -89,7 +89,7 @@ const LoginClient = ({
     initialSession.accountConfigured
       ? initialSession.passkeyCount > 0
         ? translations.passwordSignInHint
-        : translations.errorPasswordStatus
+        : ''
       : translations.createPasswordStatus,
   );
 
@@ -289,9 +289,6 @@ const LoginClient = ({
         variant="outlined"
       >
         <Flexbox direction="vertical" gap={8}>
-          <Text as="div" fontSize={13} type="secondary" weight={500}>
-            CodeBuddy2API Admin
-          </Text>
           <Text as="h1" className="login-title" weight={650}>
             {passwordMode === 'setup'
               ? translations.headingSetup
@@ -341,11 +338,6 @@ const LoginClient = ({
               onChange={(event) => {
                 setPassword(event.target.value);
               }}
-              placeholder={
-                passwordMode === 'setup'
-                  ? translations.createPasswordPlaceholder
-                  : translations.passwordLabel
-              }
               type="password"
               value={password}
             />

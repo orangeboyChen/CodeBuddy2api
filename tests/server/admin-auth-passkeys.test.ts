@@ -135,6 +135,9 @@ describe('admin auth passkeys', () => {
       'Primary key',
     );
     expect(registerResponse.status).toBe(200);
+    expect(mockVerifyRegistrationResponse).toHaveBeenCalledWith(
+      expect.objectContaining({ requireUserVerification: false }),
+    );
     expect(await adminAuth.listAdminPasskeys()).toEqual([
       expect.objectContaining({
         counter: 1,
@@ -164,6 +167,9 @@ describe('admin auth passkeys', () => {
       },
     );
     expect(authResponse.status).toBe(200);
+    expect(mockVerifyAuthenticationResponse).toHaveBeenCalledWith(
+      expect.objectContaining({ requireUserVerification: false }),
+    );
     expect(getCookieHeader(authResponse)).toContain('Secure');
     expect(await adminAuth.listAdminPasskeys()).toEqual([
       expect.objectContaining({
