@@ -336,10 +336,6 @@ const createCacheableTextBlock = (text: string): CacheableTextBlock => ({
 });
 
 const addPromptCacheControl = (message: OpenAIMessage): OpenAIMessage => {
-  if (hasPromptCacheControl(message.content)) {
-    return message;
-  }
-
   if (
     typeof message.content === 'string' &&
     message.content.trim().length >= MIN_AUTO_CACHE_TEXT_LENGTH
