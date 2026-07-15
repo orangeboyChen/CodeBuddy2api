@@ -40,7 +40,7 @@ const loginTranslations: AdminLoginMessages = {
   autofillAvailable: 'Passkey autofill is available.',
   autofillUnavailable: 'Passkey autofill is unavailable.',
   continueWithPasskey: 'Continue with passkey',
-  continueWithPassword: 'Continue with password',
+  continueWithPassword: 'Sign in',
   createAccountRedirecting: 'Admin account created. Redirecting...',
   createPasswordLabel: 'Create admin password',
   createPasswordPlaceholder: 'Choose a strong password',
@@ -53,7 +53,7 @@ const loginTranslations: AdminLoginMessages = {
   errorPasskeyFailed: 'Passkey sign-in failed.',
   errorPasskeyUnavailable: 'Passkey sign-in is unavailable right now.',
   errorPasswordStatus: 'Use your admin password to continue.',
-  headingLogin: 'Sign in to the admin console',
+  headingLogin: 'Sign in to CodeBuddy2API',
   headingSetup: 'Set up the admin account',
   noPasskeysConfigured: 'No passkeys are configured.',
   orLabel: 'or',
@@ -62,12 +62,12 @@ const loginTranslations: AdminLoginMessages = {
   passkeyHintSetup: 'and signs you in immediately.',
   passkeyStatusManual: 'Opening the passkey prompt...',
   passwordAccepted: 'Password accepted. Redirecting...',
-  passwordLabel: 'Admin password',
+  passwordLabel: 'Password',
   passwordSignInHint: 'Use your password or a saved passkey to continue.',
   signInWithPassword: 'Creating the admin account...',
   signingInPassword: 'Signing in with password...',
   title: 'Admin sign in',
-  usernameLabel: 'Admin username',
+  usernameLabel: 'Username',
   waitingForPasskey: 'Waiting for a saved passkey...',
 };
 
@@ -110,7 +110,7 @@ describe('LoginClient', () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText('Admin username'), {
+    fireEvent.change(screen.getByLabelText('Username'), {
       target: { value: 'admin' },
     });
     fireEvent.change(screen.getByLabelText('Create admin password'), {
@@ -160,15 +160,13 @@ describe('LoginClient', () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText('Admin username'), {
+    fireEvent.change(screen.getByLabelText('Username'), {
       target: { value: 'admin' },
     });
-    fireEvent.change(screen.getByLabelText('Admin password'), {
+    fireEvent.change(screen.getByLabelText('Password'), {
       target: { value: 'secret-password' },
     });
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Continue with password' }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenCalledWith(

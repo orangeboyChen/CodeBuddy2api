@@ -929,6 +929,7 @@ export const finishAdminPasskeyRegistration = async (
       expectedChallenge,
       expectedOrigin: getWebAuthnOrigin(request),
       expectedRPID: await getWebAuthnRpId(request),
+      requireUserVerification: false,
       response: responseBody as unknown as RegistrationResponseJSON,
     });
   } catch (error) {
@@ -1059,6 +1060,7 @@ export const finishAdminPasskeyAuthentication = async (
       expectedChallenge,
       expectedOrigin: getWebAuthnOrigin(request),
       expectedRPID: await getWebAuthnRpId(request),
+      requireUserVerification: false,
       response: responseBody as unknown as AuthenticationResponseJSON,
     });
   } catch (error) {

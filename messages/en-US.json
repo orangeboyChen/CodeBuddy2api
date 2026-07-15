@@ -318,7 +318,7 @@
       "autofillAvailable": "Passkey autofill is available and the page will try it automatically.",
       "autofillUnavailable": "Passkeys are configured, but this browser does not support conditional autofill. Use the passkey button instead.",
       "continueWithPasskey": "Continue with passkey",
-      "continueWithPassword": "Continue with password",
+      "continueWithPassword": "Sign in",
       "createAccountRedirecting": "Admin account created. Redirecting...",
       "createPasswordLabel": "Create admin password",
       "createPasswordPlaceholder": "Choose a strong password",
@@ -330,7 +330,7 @@
       "errorPasskeyFailed": "Passkey sign-in failed. Try again or use your password.",
       "errorPasskeyUnavailable": "Passkey sign-in is unavailable right now.",
       "errorPasswordStatus": "Use your admin password to continue.",
-      "headingLogin": "Sign in to the admin console",
+      "headingLogin": "Sign in to CodeBuddy2API",
       "headingSetup": "Set up the admin account",
       "noPasskeysConfigured": "No passkeys are configured for this admin account yet.",
       "orLabel": "or",
@@ -339,13 +339,13 @@
       "passkeyHintSetup": "and signs you in immediately.",
       "passkeyStatusManual": "Opening the passkey prompt...",
       "passwordAccepted": "Password accepted. Redirecting...",
-      "passwordLabel": "Admin password",
+      "passwordLabel": "Password",
       "passwordSignInHint": "Use your password or a saved passkey to continue.",
       "signInWithPassword": "Creating the admin account...",
       "signingInPassword": "Signing in with password...",
       "title": "Admin sign in",
       "waitingForPasskey": "Waiting for a saved passkey...",
-      "usernameLabel": "Admin username"
+      "usernameLabel": "Username"
     }
   }
 }

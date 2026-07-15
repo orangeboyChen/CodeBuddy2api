@@ -319,7 +319,7 @@
       "autofillAvailable": "対応ブラウザでは passkey 自動入力が利用可能で、このページで自動的に試行されます。",
       "autofillUnavailable": "passkey は設定済みですが、このブラウザは条件付き自動入力をサポートしていません。代わりに passkey ボタンを使用してください。",
       "continueWithPasskey": "passkey で続行",
-      "continueWithPassword": "パスワードで続行",
+      "continueWithPassword": "ログイン",
       "createAccountRedirecting": "管理者アカウントを作成しました。リダイレクトしています...",
       "createPasswordLabel": "管理者パスワードを作成",
       "createPasswordPlaceholder": "強力なパスワードを入力",
@@ -331,7 +331,7 @@
       "errorPasskeyFailed": "passkey サインインに失敗しました。再試行するか、パスワードを使用してください。",
       "errorPasskeyUnavailable": "現在 passkey サインインは利用できません。",
       "errorPasswordStatus": "管理者パスワードを使用して続行してください。",
-      "headingLogin": "管理者コンソールにサインイン",
+      "headingLogin": "CodeBuddy2API にログイン",
       "headingSetup": "管理者アカウントをセットアップ",
       "noPasskeysConfigured": "この管理者アカウントにはまだ passkey が設定されていません。",
       "orLabel": "または",
@@ -340,13 +340,13 @@
       "passkeyHintSetup": "設定成功後は即座にサインインされます。",
       "passkeyStatusManual": "passkey プロンプトを開いています...",
       "passwordAccepted": "パスワードを確認しました。リダイレクトしています...",
-      "passwordLabel": "管理者パスワード",
+      "passwordLabel": "パスワード",
       "passwordSignInHint": "パスワードまたは保存済み passkey を使用して続行してください。",
       "signInWithPassword": "管理者アカウントを作成しています...",
       "signingInPassword": "パスワードでサインインしています...",
       "title": "管理者サインイン",
       "waitingForPasskey": "保存済み passkey を待っています...",
-      "usernameLabel": "管理者ユーザー名"
+      "usernameLabel": "ユーザー名"
     }
   }
 }
