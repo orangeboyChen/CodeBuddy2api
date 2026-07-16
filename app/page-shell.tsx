@@ -529,7 +529,7 @@ const AdminPageLayoutContent = ({
 
     setCredentials((current) => ({
       ...current,
-      accessKeyActionId: null,
+      accessKeyActionId: current.accessKeyActionId ?? null,
       accessKeys: result.data?.access_keys ?? [],
       accessKeysLoading: false,
     }));
