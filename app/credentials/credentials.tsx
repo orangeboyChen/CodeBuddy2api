@@ -14,6 +14,7 @@ import {
   MousePointerClick,
   Pencil,
   Play,
+  Plus,
   RefreshCw,
   Save,
   WandSparkles,
@@ -103,6 +104,7 @@ export interface AccessKeyFormState {
 
 export interface CredentialsState {
   accessKeyActionId: string | null;
+  accessKeyCreating: boolean;
   accessKeyForm: AccessKeyFormState;
   accessKeys: AccessKeySummary[];
   accessKeysLoading: boolean;
@@ -131,6 +133,7 @@ export const authStateAtom = atom<AuthState>(defaultAuthState);
 
 export const defaultCredentialsState: CredentialsState = {
   accessKeyActionId: null,
+  accessKeyCreating: false,
   accessKeyForm: { credentialFilenames: [], editingId: null, name: '' },
   accessKeys: [],
   accessKeysLoading: true,
@@ -174,6 +177,7 @@ export const createCredentialsState = (
 export interface CredentialsTabController {
   auth: AuthState;
   credentials: CredentialsState;
+  onAddAccessKey: () => void;
   onAddCredential: () => void;
   onAuthAction: () => void;
   onCallbackUrlChange: (value: string) => void;
@@ -219,6 +223,7 @@ const Credentials = () => {
   const {
     auth,
     credentials,
+    onAddAccessKey,
     onAddCredential,
     onAuthAction,
     onCallbackUrlChange,
@@ -459,10 +464,37 @@ const Credentials = () => {
             icon={KeyRound}
             title={credentialsText('credentials.accessKeyLabel')}
           />
-          <Button icon={RefreshCw} onClick={onRefreshAccessKeys}>
-            {common('refresh')}
-          </Button>
+          <div className="flex gap-2">
+            <Button icon={Plus} onClick={onAddAccessKey} type="primary">
+              {credentialsText('credentials.accessKeyCreate')}
+            </Button>
+            <Button icon={RefreshCw} onClick={onRefreshAccessKeys}>
+              {common('refresh')}
+            </Button>
+          </div>
         </div>
+        {credentials.accessKeyCreating ? (
+          <AccessKeyCard
+            accessKey={{
+              createdAt: new Date().toISOString(),
+              credentialFilenames: [],
+              id: '__new__',
+              maskedSecret: '',
+              name: credentialsText('credentials.accessKeyCreateTitle'),
+              updatedAt: new Date().toISOString(),
+            }}
+            actionId={credentials.accessKeyActionId}
+            form={credentials.accessKeyForm}
+            isCreating
+            revealedSecret={credentials.revealedSecret}
+            validCredentials={validCredentials}
+            onCancel={onResetAccessKeyForm}
+            onResetAccessKeyForm={onResetAccessKeyForm}
+            onSaveAccessKey={onSaveAccessKey}
+            onToggleCredentialSelection={onToggleCredentialSelection}
+            onUpdateAccessKeyName={onUpdateAccessKeyName}
+          />
+        ) : null}
         <div id="accessKeysList">
           {credentials.accessKeysLoading ? (
             <div className="text-center py-8 text-secondary">

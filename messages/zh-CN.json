@@ -73,6 +73,8 @@
     },
     "credentials": {
       "accessKeyCount": "{count} 个凭证",
+      "accessKeyCreate": "创建 API Key",
+      "accessKeyCreateTitle": "创建 API Key",
       "accessKeyCreatedAt": "创建于 {value}",
       "accessKeyCurrent": "当前 API Key",
       "accessKeyEdit": "编辑 API Key",

@@ -14,12 +14,14 @@ interface AccessKeyCardProps {
   accessKey: AccessKeySummary;
   actionId: string | null;
   form: AccessKeyFormState;
+  isCreating?: boolean;
   revealedSecret: RevealedAccessKeySecret | null;
   validCredentials: CredentialSummary[];
-  onDelete: () => void;
-  onEdit: () => void;
+  onCancel?: () => void;
+  onDelete?: () => void;
+  onEdit?: () => void;
   onResetAccessKeyForm: () => void;
-  onRevealSecret: () => void;
+  onRevealSecret?: () => void;
   onSaveAccessKey: () => void;
   onToggleCredentialSelection: (filename: string) => void;
   onUpdateAccessKeyName: (value: string) => void;
@@ -29,8 +31,10 @@ export const AccessKeyCard = ({
   accessKey,
   actionId,
   form,
+  isCreating = false,
   revealedSecret,
   validCredentials,
+  onCancel,
   onDelete,
   onEdit,
   onResetAccessKeyForm,
@@ -42,9 +46,13 @@ export const AccessKeyCard = ({
   const locale = useLocale();
   const text = useTranslations('Admin');
   const common = useTranslations('Admin.common');
-  const isEditing = form.editingId === accessKey.id;
-  const isRevealed = revealedSecret?.id === accessKey.id;
-  const isBusy = actionId === accessKey.id;
+  const isEditing = !isCreating && form.editingId === accessKey.id;
+  const isRevealed = !isCreating && revealedSecret?.id === accessKey.id;
+  const isBusy = actionId === (isCreating ? '__new__' : accessKey.id);
+  const showEditor = isCreating || isEditing;
+  const nameInputId = isCreating
+    ? 'accessKeyName-new'
+    : `accessKeyName-${accessKey.id}`;
 
   return (
     <Block
@@ -54,53 +62,55 @@ export const AccessKeyCard = ({
       padding={24}
       variant="outlined"
     >
-      <div className="access-key-card-header flex items-start justify-between gap-4">
-        <div className="access-key-card-content min-w-0">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="font-semibold text-text-light dark:text-text-dark">
-              {accessKey.name}
+      {!isCreating ? (
+        <div className="access-key-card-header flex items-start justify-between gap-4">
+          <div className="access-key-card-content min-w-0">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="font-semibold text-text-light dark:text-text-dark">
+                {accessKey.name}
+              </div>
+              <Tag color="blue">
+                {text('credentials.accessKeyCount', {
+                  count: accessKey.credentialFilenames.length,
+                })}
+              </Tag>
             </div>
-            <Tag color="blue">
-              {text('credentials.accessKeyCount', {
-                count: accessKey.credentialFilenames.length,
-              })}
-            </Tag>
+            <div className="font-mono text-sm text-secondary break-all">
+              {accessKey.maskedSecret}
+            </div>
+            <div className="flex flex-wrap gap-4 text-sm text-secondary mt-3">
+              <span className="flex items-center gap-1">
+                <CalendarDays aria-hidden="true" size={14} />
+                {text('credentials.accessKeyCreatedAt', {
+                  value: new Date(accessKey.createdAt).toLocaleString(locale),
+                })}
+              </span>
+              <span className="flex items-center gap-1">
+                <Pencil aria-hidden="true" size={14} />
+                {text('credentials.accessKeyUpdatedAt', {
+                  value: new Date(accessKey.updatedAt).toLocaleString(locale),
+                })}
+              </span>
+            </div>
+            <Flexbox gap={8} wrap="wrap">
+              {accessKey.credentialFilenames.map((filename) => (
+                <Tag key={filename}>{filename}</Tag>
+              ))}
+            </Flexbox>
           </div>
-          <div className="font-mono text-sm text-secondary break-all">
-            {accessKey.maskedSecret}
+          <div className="access-key-card-actions flex gap-2 shrink-0">
+            <Button disabled={isBusy} icon={Eye} onClick={onRevealSecret}>
+              {text('credentials.viewKey')}
+            </Button>
+            <Button icon={Pencil} onClick={onEdit} type="primary">
+              {text('credentials.edit')}
+            </Button>
+            <Button danger disabled={isBusy} icon={Trash2} onClick={onDelete}>
+              {text('credentials.delete')}
+            </Button>
           </div>
-          <div className="flex flex-wrap gap-4 text-sm text-secondary mt-3">
-            <span className="flex items-center gap-1">
-              <CalendarDays aria-hidden="true" size={14} />
-              {text('credentials.accessKeyCreatedAt', {
-                value: new Date(accessKey.createdAt).toLocaleString(locale),
-              })}
-            </span>
-            <span className="flex items-center gap-1">
-              <Pencil aria-hidden="true" size={14} />
-              {text('credentials.accessKeyUpdatedAt', {
-                value: new Date(accessKey.updatedAt).toLocaleString(locale),
-              })}
-            </span>
-          </div>
-          <Flexbox gap={8} wrap="wrap">
-            {accessKey.credentialFilenames.map((filename) => (
-              <Tag key={filename}>{filename}</Tag>
-            ))}
-          </Flexbox>
         </div>
-        <div className="access-key-card-actions flex gap-2 shrink-0">
-          <Button disabled={isBusy} icon={Eye} onClick={onRevealSecret}>
-            {text('credentials.viewKey')}
-          </Button>
-          <Button icon={Pencil} onClick={onEdit} type="primary">
-            {text('credentials.edit')}
-          </Button>
-          <Button danger disabled={isBusy} icon={Trash2} onClick={onDelete}>
-            {text('credentials.delete')}
-          </Button>
-        </div>
-      </div>
+      ) : null}
       {isRevealed ? (
         <Flexbox direction="vertical" gap={8}>
           <div className="mb-2 font-medium text-text-light dark:text-text-dark">
@@ -115,10 +125,12 @@ export const AccessKeyCard = ({
           </Block>
         </Flexbox>
       ) : null}
-      {isEditing ? (
+      {showEditor ? (
         <Flexbox direction="vertical" gap={16}>
           <div className="font-medium text-text-light dark:text-text-dark">
-            {text('credentials.accessKeyEdit')}
+            {isCreating
+              ? text('credentials.accessKeyCreateTitle')
+              : text('credentials.accessKeyEdit')}
           </div>
           <div className="text-sm text-secondary mt-2">
             {text('credentials.accessKeyHelp')}
@@ -126,12 +138,12 @@ export const AccessKeyCard = ({
           <div className="mt-4">
             <label
               className="block mb-2 font-medium text-text-light dark:text-text-dark"
-              htmlFor={`accessKeyName-${accessKey.id}`}
+              htmlFor={nameInputId}
             >
               {text('credentials.accessKeyName')}
             </label>
             <Input
-              id={`accessKeyName-${accessKey.id}`}
+              id={nameInputId}
               placeholder={text('credentials.accessKeyExampleName')}
               type="text"
               value={form.name}
@@ -182,7 +194,7 @@ export const AccessKeyCard = ({
             </div>
           </div>
           <div className="mt-4 flex gap-2">
-            <Button icon={X} onClick={onResetAccessKeyForm}>
+            <Button icon={X} onClick={onCancel ?? onResetAccessKeyForm}>
               {common('cancel')}
             </Button>
             <Button

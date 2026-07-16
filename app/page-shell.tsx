@@ -529,7 +529,7 @@ const AdminPageLayoutContent = ({
 
     setCredentials((current) => ({
       ...current,
-      accessKeyActionId: null,
+      accessKeyActionId: current.accessKeyActionId ?? null,
       accessKeys: result.data?.access_keys ?? [],
       accessKeysLoading: false,
     }));
@@ -1033,6 +1033,7 @@ const AdminPageLayoutContent = ({
     setCredentials((current) => ({
       ...current,
       accessKeyActionId: null,
+      accessKeyCreating: false,
       accessKeyForm: {
         credentialFilenames: [],
         editingId: null,
@@ -1600,6 +1601,17 @@ const AdminPageLayoutContent = ({
               value={{
                 auth,
                 credentials,
+                onAddAccessKey: () => {
+                  setCredentials((current) => ({
+                    ...current,
+                    accessKeyCreating: true,
+                    accessKeyForm: {
+                      credentialFilenames: [],
+                      editingId: null,
+                      name: '',
+                    },
+                  }));
+                },
                 onAddCredential: () => {
                   void addCredential();
                 },
@@ -1673,6 +1685,7 @@ const AdminPageLayoutContent = ({
                 onEditAccessKey: (accessKey) => {
                   setCredentials((current) => ({
                     ...current,
+                    accessKeyCreating: false,
                     accessKeyForm: {
                       credentialFilenames: accessKey.credentialFilenames.filter(
                         (filename) =>
@@ -1769,6 +1782,7 @@ const AdminPageLayoutContent = ({
                 onResetAccessKeyForm: () => {
                   setCredentials((current) => ({
                     ...current,
+                    accessKeyCreating: false,
                     accessKeyForm: {
                       credentialFilenames: [],
                       editingId: null,

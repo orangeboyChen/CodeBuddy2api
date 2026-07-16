@@ -73,6 +73,8 @@
     },
     "credentials": {
       "accessKeyCount": "{count} credentials",
+      "accessKeyCreate": "Create API key",
+      "accessKeyCreateTitle": "Create API key",
       "accessKeyCreatedAt": "Created {value}",
       "accessKeyCurrent": "Current API key",
       "accessKeyEdit": "Edit API key",

@@ -73,6 +73,8 @@
     },
     "credentials": {
       "accessKeyCount": "{count} 件の認証情報",
+      "accessKeyCreate": "API key を作成",
+      "accessKeyCreateTitle": "API key を作成",
       "accessKeyCreatedAt": "作成: {value}",
       "accessKeyCurrent": "現在の API key",
       "accessKeyEdit": "API key を編集",
