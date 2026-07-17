@@ -448,7 +448,7 @@ const StructuredUpstreamResponse = ({
   const responseRecord = isRecord(response) ? response : null;
   const content =
     eventPayloads
-      .map(getText)
+      .map((event) => (isRecord(event) ? getText(event.choices) : null))
       .filter((item): item is string => Boolean(item))
       .join('') ||
     getText(responseRecord?.choices) ||

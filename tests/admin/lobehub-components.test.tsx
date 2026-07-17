@@ -7,6 +7,7 @@ import { NextIntlClientProvider } from 'next-intl';
 
 import Dashboard from '@/app/dashboard/dashboard';
 import { DashboardProvider } from '@/app/dashboard/dashboard';
+import Debug, { DebugProvider } from '@/app/debug/debug';
 import { getMessages } from '@/lib/i18n/messages';
 
 const renderWithMessages = (children: React.ReactNode) => {
@@ -81,5 +82,59 @@ describe('dashboard view', () => {
     expect(
       screen.getAllByText('Last checked 7/12/2026, 5:00:00 PM').length,
     ).toBeGreaterThan(0);
+  });
+});
+
+describe('debug view', () => {
+  it('aggregates OpenAI streaming choice deltas', () => {
+    renderWithMessages(
+      <DebugProvider
+        value={{
+          autoRefreshOptions: [],
+          debug: {
+            autoRefreshSeconds: 0,
+            detailLoadedIds: { stream: true },
+            detailLoadingIds: {},
+            enabled: true,
+            items: [
+              {
+                credentialFilename: null,
+                createdAt: '2026-07-18T00:00:00.000Z',
+                error: null,
+                id: 'stream',
+                requestBody: {},
+                requestKey: null,
+                route: '/v1/chat/completions',
+                transformedResponse: null,
+                upstreamRequest: {
+                  body: {},
+                  method: 'POST',
+                  url: 'https://upstream.test',
+                },
+                upstreamResponse: {
+                  body: 'data: {"choices":[{"delta":{"content":"Hello "}}]}\n\ndata: {"choices":[{"delta":{"content":"world"}}]}\n\ndata: [DONE]\n\n',
+                  status: 200,
+                },
+              },
+            ],
+            loading: false,
+            maxEntries: 100,
+            saving: false,
+          },
+          onAutoRefreshSecondsChange: vi.fn(),
+          onClear: vi.fn(),
+          onCopy: vi.fn(),
+          onEnabledChange: vi.fn(),
+          onMaxEntriesChange: vi.fn(),
+          onRefresh: vi.fn(),
+          onSave: vi.fn(),
+        }}
+      >
+        <Debug />
+      </DebugProvider>,
+    );
+
+    screen.getByText('/v1/chat/completions').click();
+    expect(screen.getByText('Hello world')).toBeVisible();
   });
 });
