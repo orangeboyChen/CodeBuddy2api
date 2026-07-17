@@ -116,12 +116,8 @@ const SENSITIVE_FIELD_NAMES = new Set([
   'x-user-id',
   'x_user_id',
 ]);
-const SENSITIVE_JSON_FIELD_PATTERN = new RegExp(
-  `("(?:${[...SENSITIVE_FIELD_NAMES]
-    .map((name) => name.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'))
-    .join('|')})"\\s*:\\s*)"(?:\\\\.|[^"\\\\])*(?:"|$)`,
-  'gi',
-);
+const JSON_STRING_PROPERTY_PATTERN =
+  /("(?:\\.|[^"\\])*")(\s*:\s*)("(?:\\.|[^"\\])*(?:"|$))/g;
 
 const enqueueDebugWrite = async <T>(mutation: () => Promise<T>): Promise<T> => {
   const operation = debugWriteQueue.then(mutation, mutation);
@@ -226,6 +222,23 @@ const truncateString = (value: string): string => {
   return `${value.slice(0, MAX_SNAPSHOT_TEXT_LENGTH)}\n...[truncated]`;
 };
 
+const redactSensitiveJsonFields = (value: string): string => {
+  return value.replace(
+    JSON_STRING_PROPERTY_PATTERN,
+    (match, serializedKey: string, separator: string) => {
+      try {
+        const key = JSON.parse(serializedKey) as unknown;
+
+        return typeof key === 'string' && isSensitiveFieldName(key)
+          ? `${serializedKey}${separator}${JSON.stringify(REDACTED_VALUE)}`
+          : match;
+      } catch {
+        return match;
+      }
+    },
+  );
+};
+
 const tryParseBody = (
   text: string,
   contentType: string,
@@ -242,10 +255,7 @@ const tryParseBody = (
         JSON.parse(trimmed) as Record<string, unknown> | unknown[],
       ) as Record<string, unknown> | unknown[];
     } catch {
-      return trimmed.replace(
-        SENSITIVE_JSON_FIELD_PATTERN,
-        `$1${JSON.stringify(REDACTED_VALUE)}`,
-      );
+      return redactSensitiveJsonFields(trimmed);
     }
   }
 
@@ -562,7 +572,7 @@ const getResponseRecord = (body: unknown): Record<string, unknown> | null => {
   for (const event of events.reverse()) {
     try {
       const parsed = asRecord(JSON.parse(event) as unknown);
-      if (parsed?.usage) {
+      if (getResponseUsage(parsed)) {
         return parsed;
       }
     } catch {
@@ -577,11 +587,19 @@ const getResponseRecord = (body: unknown): Record<string, unknown> | null => {
   }
 };
 
+const getResponseUsage = (
+  response: Record<string, unknown> | null,
+): Record<string, unknown> | null => {
+  return (
+    asRecord(asRecord(response?.response)?.usage) ?? asRecord(response?.usage)
+  );
+};
+
 const getTraceUsage = (trace: DebugTrace): DebugUsageMetrics | null => {
   const responseBody =
     getResponseRecord(trace.transformedResponse?.body) ??
     getResponseRecord(trace.upstreamResponse?.body);
-  const usage = asRecord(responseBody?.usage);
+  const usage = getResponseUsage(responseBody);
 
   if (!usage) {
     return null;
