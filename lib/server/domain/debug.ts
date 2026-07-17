@@ -86,6 +86,8 @@ const MAX_PENDING_LOGS = 100;
 const REDACTED_VALUE = '[redacted]';
 let debugWriteQueue: Promise<void> = Promise.resolve();
 let pendingDebugLogs: DebugLogEntry[] = [];
+let pendingDebugFlushes = 0;
+let pendingDebugTraces = 0;
 let debugFlushTimer: ReturnType<typeof setTimeout> | null = null;
 const SENSITIVE_HEADER_NAMES = new Set([
   'authorization',
@@ -347,6 +349,15 @@ export const listDebugLogs = async (): Promise<DebugLogEntry[]> => {
   return readDebugLogs();
 };
 
+export const hasPendingDebugLogWrites = (): boolean => {
+  return Boolean(
+    pendingDebugLogs.length ||
+    debugFlushTimer ||
+    pendingDebugFlushes ||
+    pendingDebugTraces,
+  );
+};
+
 export const clearDebugLogs = async (): Promise<void> => {
   pendingDebugLogs = [];
   if (debugFlushTimer) {
@@ -591,6 +602,8 @@ const flushPendingDebugLogs = async (): Promise<void> => {
 
   if (!entries.length) return;
 
+  pendingDebugFlushes += 1;
+
   try {
     await enqueueDebugWrite(async () => {
       if (getStorageBackendMeta().backend !== 'file') {
@@ -623,6 +636,8 @@ const flushPendingDebugLogs = async (): Promise<void> => {
     pendingDebugLogs = [...entries, ...pendingDebugLogs];
     scheduleDebugFlush();
     throw error;
+  } finally {
+    pendingDebugFlushes -= 1;
   }
 };
 
@@ -642,6 +657,7 @@ export const finalizeDebugTrace = (
     return;
   }
 
+  pendingDebugTraces += 1;
   const elapsedMs = Math.max(0, Date.now() - trace.startedAtMs);
 
   trace.pending.push(
@@ -674,5 +690,6 @@ export const finalizeDebugTrace = (
         upstreamResponse: trace.upstreamResponse,
         usage: getTraceUsage(trace),
       });
+      pendingDebugTraces -= 1;
     });
 };

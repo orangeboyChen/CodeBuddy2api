@@ -8,6 +8,7 @@ import {
   enqueueUpstreamResponseSnapshot,
   finalizeDebugTrace,
   getDebugSettings,
+  hasPendingDebugLogWrites,
   isDebugEnabled,
   listDebugLogs,
   setDebugTraceError,
@@ -257,9 +258,11 @@ describe('debug and usage persistence', () => {
       finalizeDebugTrace(trace, new Response('completed'));
 
       await vi.runAllTicks();
+      expect(hasPendingDebugLogWrites()).toBe(true);
       expect(await listDebugLogs()).toEqual([]);
 
       await vi.runAllTimersAsync();
+      expect(hasPendingDebugLogWrites()).toBe(false);
       const [entry] = await listDebugLogs();
       expect(entry).toMatchObject({
         model: 'gpt-5.5',

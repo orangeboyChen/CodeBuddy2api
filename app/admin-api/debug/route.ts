@@ -2,6 +2,7 @@ import { getAdminSessionErrorResponse } from '@/lib/server/admin/session';
 import {
   clearDebugLogs,
   getDebugSettings,
+  hasPendingDebugLogWrites,
   listDebugLogs,
   updateDebugSettings,
 } from '@/lib/server/domain/debug';
@@ -20,6 +21,7 @@ export const GET = async (request: Request): Promise<Response> => {
   const settings = await getDebugSettings();
   const debugId = new URL(request.url).searchParams.get('id');
   const logs = await listDebugLogs();
+  const pending = hasPendingDebugLogWrites();
 
   if (debugId) {
     const item = logs.find((log) => log.id === debugId);
@@ -51,6 +53,7 @@ export const GET = async (request: Request): Promise<Response> => {
         : null,
     })),
     maxEntries: settings.maxEntries,
+    pending,
   });
 };
 
