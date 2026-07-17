@@ -116,6 +116,12 @@ const SENSITIVE_FIELD_NAMES = new Set([
   'x-user-id',
   'x_user_id',
 ]);
+const SENSITIVE_JSON_FIELD_PATTERN = new RegExp(
+  `("(?:${[...SENSITIVE_FIELD_NAMES]
+    .map((name) => name.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'))
+    .join('|')})"\\s*:\\s*)"(?:\\\\.|[^"\\\\])*(?:"|$)`,
+  'gi',
+);
 
 const enqueueDebugWrite = async <T>(mutation: () => Promise<T>): Promise<T> => {
   const operation = debugWriteQueue.then(mutation, mutation);
@@ -236,7 +242,10 @@ const tryParseBody = (
         JSON.parse(trimmed) as Record<string, unknown> | unknown[],
       ) as Record<string, unknown> | unknown[];
     } catch {
-      return truncateString(trimmed);
+      return trimmed.replace(
+        SENSITIVE_JSON_FIELD_PATTERN,
+        `$1${JSON.stringify(REDACTED_VALUE)}`,
+      );
     }
   }
 
@@ -345,7 +354,10 @@ const readDebugLogs = async (): Promise<DebugLogEntry[]> => {
 };
 
 export const listDebugLogs = async (): Promise<DebugLogEntry[]> => {
-  void flushPendingDebugLogs().catch(() => undefined);
+  while (pendingDebugLogs.length) {
+    await flushPendingDebugLogs();
+  }
+  await debugWriteQueue;
   return readDebugLogs();
 };
 
@@ -640,7 +652,10 @@ const flushPendingDebugLogs = async (): Promise<void> => {
 
   const entries = pendingDebugLogs.splice(0, MAX_PENDING_LOGS);
 
-  if (!entries.length) return;
+  if (!entries.length) {
+    await debugWriteQueue;
+    return;
+  }
 
   pendingDebugFlushes += 1;
 

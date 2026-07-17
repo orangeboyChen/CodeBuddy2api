@@ -304,6 +304,61 @@ describe('debug and usage persistence', () => {
     expect(entry.transformedResponse?.body).not.toContain('tail');
   });
 
+  it('redacts sensitive fields in truncated JSON response snapshots', async () => {
+    await updateDebugSettings({ enabled: true, maxEntries: 10 });
+    const trace = createDebugTrace({
+      requestBody: {},
+      requestKey: null,
+      route: '/v1/responses',
+    });
+
+    finalizeDebugTrace(
+      trace,
+      new Response(
+        JSON.stringify({
+          access_token: 'snapshot-access-token',
+          payload: 'a'.repeat(200_000),
+        }),
+        { headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    await vi.waitFor(async () => {
+      expect(await listDebugLogs()).toHaveLength(1);
+    });
+    const [entry] = await listDebugLogs();
+    const body = String(entry.transformedResponse?.body);
+    expect(body).toContain('[redacted]');
+    expect(body).not.toContain('snapshot-access-token');
+  });
+
+  it('returns the retained entry after flushing a full debug log', async () => {
+    await updateDebugSettings({ enabled: true, maxEntries: 1 });
+    const firstTrace = createDebugTrace({
+      requestBody: { input: 'first' },
+      requestKey: null,
+      route: '/v1/chat/completions',
+    });
+    finalizeDebugTrace(firstTrace, Response.json({ message: 'first' }));
+
+    await vi.waitFor(async () => {
+      expect(await listDebugLogs()).toHaveLength(1);
+    });
+
+    const secondTrace = createDebugTrace({
+      requestBody: { input: 'second' },
+      requestKey: null,
+      route: '/v1/chat/completions',
+    });
+    finalizeDebugTrace(secondTrace, Response.json({ message: 'second' }));
+
+    await vi.waitFor(async () => {
+      const logs = await listDebugLogs();
+      expect(logs).toHaveLength(1);
+      expect(logs[0]?.id).toBe(secondTrace.id);
+    });
+  });
+
   it('extracts usage from OpenAI streaming response events', async () => {
     await updateDebugSettings({ enabled: true, maxEntries: 10 });
     const trace = createDebugTrace({

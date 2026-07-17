@@ -100,6 +100,7 @@ describe('debug view', () => {
               {
                 credentialFilename: null,
                 createdAt: '2026-07-18T00:00:00.000Z',
+                elapsedMs: null,
                 error: null,
                 id: 'stream',
                 requestBody: {},
@@ -145,6 +146,7 @@ describe('debug view', () => {
     await waitFor(() => {
       expect(document.body).toHaveTextContent('Hello world');
     });
+    expect(screen.queryByText('nullms')).not.toBeInTheDocument();
     expect(screen.getByText('Assistant')).toBeVisible();
     expect(screen.queryByText('User')).not.toBeInTheDocument();
 

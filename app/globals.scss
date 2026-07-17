@@ -281,6 +281,29 @@ textarea {
   flex: 0 0 88px;
 }
 
+#debug .debug-entry .ant-collapse-header {
+  min-width: 0;
+  overflow: hidden;
+}
+
+#debug .debug-entry .ant-collapse-header-text {
+  flex: 1 1 0;
+  min-width: 0;
+  width: 0;
+}
+
+#debug .debug-entry-tags > span {
+  min-width: 0;
+}
+
+#debug .debug-entry-tags {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: wrap !important;
+  gap: 20px !important;
+  width: 100%;
+}
+
 .dashboard-metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -509,10 +532,21 @@ textarea {
       .debug-entry,
       .debug-payload,
       .debug-entry-summary,
-      .debug-payload-summary
+      .debug-payload-summary,
+      .ant-collapse-header-text,
+      .ant-collapse-content-box,
+      .debug-message-list,
+      .debug-messages-section,
+      .debug-tool-list,
+      .debug-tool-item,
+      .debug-tool-item-content
     ) {
     max-width: 100%;
     min-width: 0;
+  }
+
+  #debug .ant-collapse-content-box {
+    overflow: hidden;
   }
 
   #debug .debug-entry-summary,
@@ -526,9 +560,45 @@ textarea {
     min-width: 0;
   }
 
+  #debug .debug-entry-tags {
+    flex-direction: column !important;
+    flex-wrap: nowrap !important;
+  }
+
   #debug :is(.debug-entry-tags, .debug-entry-tags [class*='tag']) {
     overflow-wrap: anywhere;
     white-space: normal;
+  }
+
+  #debug .debug-entry .ant-tag,
+  #debug .debug-entry-tags > span,
+  #debug .debug-entry-tags > span > span {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  #debug .debug-entry .ant-tag {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 22px;
+  }
+
+  #debug .debug-credential {
+    justify-content: flex-start;
+    width: 100% !important;
+  }
+
+  #debug .debug-credential > span {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  #debug .debug-entry-tags > span {
+    flex: 1 1 8rem;
   }
 
   #debug .debug-payload-summary > button {
@@ -542,6 +612,20 @@ textarea {
 
   #debug .debug-message-role {
     flex-basis: auto;
+  }
+
+  #debug .debug-tool-item {
+    --lobe-flex-direction: column !important;
+    align-items: stretch !important;
+  }
+
+  #debug .debug-tool-item-content {
+    width: 100%;
+  }
+
+  #debug .debug-raw-code {
+    max-height: 28rem;
+    min-height: 12rem;
   }
 }
 

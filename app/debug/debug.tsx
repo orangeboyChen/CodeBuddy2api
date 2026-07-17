@@ -55,7 +55,7 @@ export interface DebugLogEntry {
     headers?: Record<string, string>;
     status: number;
   } | null;
-  elapsedMs?: number;
+  elapsedMs?: number | null;
   model?: string | null;
   usage?: {
     cacheCreationTokens: number;
@@ -189,6 +189,10 @@ const formatDuration = (elapsedMs: number): string => {
   return `${minutes}m ${remainingSeconds}s`;
 };
 
+const hasDuration = (value: unknown): value is number => {
+  return typeof value === 'number' && Number.isFinite(value);
+};
+
 const getText = (value: unknown): string | null => {
   if (typeof value === 'string') return value;
   if (Array.isArray(value)) {
@@ -297,12 +301,14 @@ const DebugMetric = ({
   if (value === null || value === undefined || value === '') return null;
   return (
     <span
-      className="inline-flex items-center gap-1 text-xs text-secondary"
+      className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-1 text-xs text-secondary"
       title={label}
     >
       <Icon aria-hidden="true" size={14} />
-      <span>{label}</span>
-      <span>{typeof value === 'number' ? value.toLocaleString() : value}</span>
+      <span className="break-words">{label}</span>
+      <span className="break-all">
+        {typeof value === 'number' ? value.toLocaleString() : value}
+      </span>
     </span>
   );
 };
@@ -344,6 +350,11 @@ const StructuredUpstreamRequest = ({
                 <Wrench aria-hidden="true" size={16} /> Tools ({tools.length})
               </div>
               <List
+                className="debug-tool-list"
+                classNames={{
+                  container: 'debug-tool-item-content',
+                  item: 'debug-tool-item',
+                }}
                 items={tools.map((tool, index) => {
                   const functionValue = isRecord(tool.function)
                     ? tool.function
@@ -711,13 +722,13 @@ const Debug = () => {
                 ),
                 key: item.id,
                 label: (
-                  <div className="grid items-start gap-3 w-full min-w-0 max-w-full overflow-hidden text-left">
+                  <div className="grid items-start gap-3 w-full min-w-0 max-w-full text-left">
                     <div className="font-medium text-text-light dark:text-text-dark break-words text-left">
                       {item.route}
                     </div>
                     <div className="flex flex-wrap items-start gap-2 text-xs min-w-0 max-w-full">
                       <Tag
-                        className="!px-0 min-w-0 max-w-full whitespace-normal"
+                        className="debug-credential !px-0 min-w-0 max-w-full whitespace-normal"
                         variant="borderless"
                       >
                         {debugText('credential')}:{' '}
@@ -748,7 +759,14 @@ const Debug = () => {
                       {formatCreatedAt(item.createdAt)} · key:{' '}
                       {item.requestKey ?? debugText('requestKeyNone')}
                     </div>
-                    <div className="debug-entry-tags flex flex-wrap items-start gap-x-5 gap-y-2 text-xs min-w-0 max-w-full text-left">
+                    <Flexbox
+                      align="flex-start"
+                      className="debug-entry-tags text-xs text-left"
+                      gap={20}
+                      horizontal
+                      width="100%"
+                      wrap="wrap"
+                    >
                       <DebugMetric
                         icon={Bot}
                         label="Model"
@@ -776,7 +794,9 @@ const Debug = () => {
                         icon={Gauge}
                         label="TPS"
                         value={
-                          item.elapsedMs && item.usage?.totalTokens
+                          hasDuration(item.elapsedMs) &&
+                          item.elapsedMs > 0 &&
+                          item.usage?.totalTokens
                             ? Math.round(
                                 (item.usage.totalTokens * 1_000) /
                                   item.elapsedMs,
@@ -788,12 +808,12 @@ const Debug = () => {
                         icon={Clock3}
                         label="Request duration"
                         value={
-                          item.elapsedMs === undefined
-                            ? null
-                            : formatDuration(item.elapsedMs)
+                          hasDuration(item.elapsedMs)
+                            ? formatDuration(item.elapsedMs)
+                            : null
                         }
                       />
-                    </div>
+                    </Flexbox>
                   </div>
                 ),
               }))}
