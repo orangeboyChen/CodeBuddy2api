@@ -525,10 +525,50 @@ const getTraceModel = (trace: DebugTrace): string | null => {
   return typeof model === 'string' && model.trim() ? model.trim() : null;
 };
 
+const getResponseRecord = (body: unknown): Record<string, unknown> | null => {
+  const record = asRecord(body);
+
+  if (record) {
+    return record;
+  }
+
+  if (typeof body !== 'string') {
+    return null;
+  }
+
+  const events = body
+    .split(/\r?\n\r?\n/)
+    .map((event) =>
+      event
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice('data:'.length).trim())
+        .join('\n'),
+    )
+    .filter(Boolean);
+
+  for (const event of events.reverse()) {
+    try {
+      const parsed = asRecord(JSON.parse(event) as unknown);
+      if (parsed?.usage) {
+        return parsed;
+      }
+    } catch {
+      // Ignore non-JSON SSE sentinels such as [DONE].
+    }
+  }
+
+  try {
+    return asRecord(JSON.parse(body) as unknown);
+  } catch {
+    return null;
+  }
+};
+
 const getTraceUsage = (trace: DebugTrace): DebugUsageMetrics | null => {
   const responseBody =
-    asRecord(trace.transformedResponse?.body) ??
-    asRecord(trace.upstreamResponse?.body);
+    getResponseRecord(trace.transformedResponse?.body) ??
+    getResponseRecord(trace.upstreamResponse?.body);
   const usage = asRecord(responseBody?.usage);
 
   if (!usage) {

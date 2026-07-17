@@ -304,6 +304,44 @@ describe('debug and usage persistence', () => {
     expect(entry.transformedResponse?.body).not.toContain('tail');
   });
 
+  it('extracts usage from OpenAI streaming response events', async () => {
+    await updateDebugSettings({ enabled: true, maxEntries: 10 });
+    const trace = createDebugTrace({
+      requestBody: { model: 'gpt-5.5' },
+      requestKey: null,
+      route: '/v1/chat/completions',
+    });
+    const stream =
+      'data: {"choices":[{"delta":{"content":"hello"}}]}\n\n' +
+      'data: {"usage":{"prompt_tokens":3,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":2}}}\n\n' +
+      'data: [DONE]\n\n';
+
+    enqueueUpstreamResponseSnapshot(
+      trace,
+      new Response(stream, {
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+    finalizeDebugTrace(
+      trace,
+      new Response(stream, {
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+
+    await vi.waitFor(async () => {
+      expect(await listDebugLogs()).toHaveLength(1);
+    });
+    const [entry] = await listDebugLogs();
+    expect(entry.usage).toEqual({
+      cacheCreationTokens: 0,
+      cacheReadTokens: 2,
+      inputTokens: 3,
+      outputTokens: 5,
+      totalTokens: 8,
+    });
+  });
+
   it('serializes concurrent debug and usage persistence', async () => {
     await updateDebugSettings({ enabled: true, maxEntries: 2 });
     const firstTrace = createDebugTrace({
