@@ -82,6 +82,7 @@ const DEFAULT_DEBUG_SETTINGS: DebugSettings = {
 
 const MAX_SNAPSHOT_TEXT_LENGTH = 200_000;
 const FLUSH_INTERVAL_MS = 1000;
+const DEBUG_SETTINGS_CACHE_TTL_MS = 1000;
 const MAX_PENDING_LOGS = 100;
 const REDACTED_VALUE = '[redacted]';
 let debugWriteQueue: Promise<void> = Promise.resolve();
@@ -89,7 +90,11 @@ let pendingDebugLogs: DebugLogEntry[] = [];
 let pendingDebugFlushes = 0;
 let pendingDebugTraces = 0;
 let debugFlushTimer: ReturnType<typeof setTimeout> | null = null;
-let debugSettingsCache: { key: string; value: DebugSettings } | null = null;
+let debugSettingsCache: {
+  cachedAt: number;
+  key: string;
+  value: DebugSettings;
+} | null = null;
 const SENSITIVE_HEADER_NAMES = new Set([
   'authorization',
   'proxy-authorization',
@@ -322,7 +327,11 @@ const readDebugSettings = async (): Promise<DebugSettings> => {
         : DEFAULT_DEBUG_SETTINGS.enabled,
     maxEntries: normalizeMaxEntries(file.maxEntries),
   };
-  debugSettingsCache = { key: getDebugSettingsCacheKey(), value: settings };
+  debugSettingsCache = {
+    cachedAt: Date.now(),
+    key: getDebugSettingsCacheKey(),
+    value: settings,
+  };
   return settings;
 };
 
@@ -360,7 +369,11 @@ export const updateDebugSettings = async (
     const logs = await readDebugLogs();
     await writeStorageJson('debug', 'logs', logs.slice(0, merged.maxEntries));
   });
-  debugSettingsCache = { key: getDebugSettingsCacheKey(), value: merged };
+  debugSettingsCache = {
+    cachedAt: Date.now(),
+    key: getDebugSettingsCacheKey(),
+    value: merged,
+  };
 
   return merged;
 };
@@ -429,7 +442,10 @@ export const clearDebugLogs = async (): Promise<void> => {
 export const isDebugEnabled = async (): Promise<boolean> => {
   const cacheKey = getDebugSettingsCacheKey();
 
-  if (debugSettingsCache?.key === cacheKey) {
+  if (
+    debugSettingsCache?.key === cacheKey &&
+    Date.now() - debugSettingsCache.cachedAt < DEBUG_SETTINGS_CACHE_TTL_MS
+  ) {
     return debugSettingsCache.value.enabled;
   }
 

@@ -1029,6 +1029,21 @@ describe('server runtime', () => {
       },
     });
 
+    const filteredUsageResponse = await AdminUsageRoute.PATCH(
+      new Request('http://localhost/admin-api/usage', {
+        body: JSON.stringify({
+          accessKey: ['key-1'],
+          autoRefreshSeconds: 30,
+          credential: ['runtime-credential.json'],
+          range: 'today',
+        }),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'PATCH',
+      }),
+    );
+    expect(filteredUsageResponse.status).toBe(200);
+    expect((await filteredUsageResponse.json()).range).toBe('today');
+
     const usageResponse = await AdminUsageRoute.GET(
       makeNextRequest('http://localhost/admin-api/usage'),
     );

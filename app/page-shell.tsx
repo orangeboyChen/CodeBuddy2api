@@ -716,19 +716,14 @@ const AdminPageLayoutContent = ({
         request: nextRequest,
       }));
 
-      const result = await requestJson<UsageResponse>(
-        '/admin-api/usage',
-        requestOverride || autoRefreshSecondsOverride !== undefined
-          ? {
-              body: JSON.stringify({
-                ...nextRequest,
-                autoRefreshSeconds: nextAutoRefreshSeconds,
-              }),
-              headers: { 'Content-Type': 'application/json' },
-              method: 'PATCH',
-            }
-          : undefined,
-      );
+      const result = await requestJson<UsageResponse>('/admin-api/usage', {
+        body: JSON.stringify({
+          ...nextRequest,
+          autoRefreshSeconds: nextAutoRefreshSeconds,
+        }),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'PATCH',
+      });
 
       if (!result.ok) {
         setUsage((current) => ({

@@ -26,7 +26,7 @@ import {
   recordUsageEvent,
   resetUsageHistory,
 } from '@/lib/server/domain/usage';
-import { resetStorageRuntime } from '@/lib/server/storage';
+import { resetStorageRuntime, writeStorageJson } from '@/lib/server/storage';
 
 const repoRoot = process.cwd();
 const tempRootDir = path.join(repoRoot, '.tmp-test-debug-usage-root');
@@ -153,6 +153,28 @@ describe('debug and usage persistence', () => {
       enabled: true,
       maxEntries: 10,
     });
+  });
+
+  it('refreshes the debug-enabled cache after its short TTL', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-19T00:00:00.000Z'));
+
+    try {
+      await updateDebugSettings({ enabled: true });
+      expect(await isDebugEnabled()).toBe(true);
+
+      await writeStorageJson('debug', 'settings', {
+        autoRefreshSeconds: 0,
+        enabled: false,
+        maxEntries: 10,
+      });
+      expect(await isDebugEnabled()).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(await isDebugEnabled()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('captures sanitized debug request and response snapshots', async () => {
