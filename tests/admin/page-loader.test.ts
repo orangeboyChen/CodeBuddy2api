@@ -82,7 +82,7 @@ describe('tab-scoped initial data', () => {
   });
 
   it.each([
-    ['dashboard', ['listCredentials', 'getUsageStats']],
+    ['dashboard', ['getUsageAnalytics', 'listCredentials']],
     ['usage', ['getUsageAnalytics']],
     [
       'credentials',
@@ -125,10 +125,11 @@ describe('tab-scoped initial data', () => {
   it('restores persisted usage filters and refresh settings in the usage snapshot', async () => {
     vi.mocked(getUsageAnalytics).mockResolvedValue({
       callSeries: [],
+      credentialRows: [],
       filters: { accessKeys: [], credentials: [] },
       range: 'today',
+      rangeSummary: { cacheHitTokens: 0, callCount: 0, totalTokens: 0 },
       tableRows: [],
-      todaySummary: { cacheHitTokens: 0, callCount: 0, totalTokens: 0 },
       tokenSeries: [],
     } as never);
 

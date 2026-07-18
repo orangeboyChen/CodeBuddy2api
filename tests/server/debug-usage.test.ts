@@ -92,6 +92,15 @@ describe('debug and usage persistence', () => {
 
     expect(trace.requestKey).toBe('sk-live-********1234');
     expect(trace.requestKey).not.toContain('Bearer');
+
+    const shortTrace = createDebugTrace({
+      requestBody: { api_key: 'abc' },
+      requestKey: 'abc',
+      route: '/v1/chat/completions',
+    });
+
+    expect(shortTrace.requestKey).toBe('****');
+    expect(shortTrace.requestBody).toMatchObject({ api_key: '****' });
   });
 
   it('normalizes debug settings and handles invalid persisted files', async () => {
@@ -534,7 +543,7 @@ describe('debug and usage persistence', () => {
     ]);
 
     expect(
-      (await getUsageAnalytics({ range: 'today' })).todaySummary.callCount,
+      (await getUsageAnalytics({ range: 'today' })).rangeSummary.callCount,
     ).toBe(2);
   });
 
@@ -567,7 +576,7 @@ describe('debug and usage persistence', () => {
       usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 },
     });
     expect(
-      (await getUsageAnalytics({ range: 'today' })).todaySummary,
+      (await getUsageAnalytics({ range: 'today' })).rangeSummary,
     ).toMatchObject({ callCount: 1, totalTokens: 3 });
 
     await clearDebugLogs();
@@ -623,7 +632,7 @@ describe('debug and usage persistence', () => {
       now,
       range: '3h',
     });
-    expect(analytics.todaySummary).toEqual({
+    expect(analytics.rangeSummary).toEqual({
       callCount: 2,
       cacheHitTokens: 3,
       totalTokens: 43,
@@ -652,10 +661,18 @@ describe('debug and usage persistence', () => {
     });
     expect(analytics.tokenSeries).toHaveLength(2);
     expect(analytics.callSeries).toHaveLength(2);
+    expect(analytics.credentialRows).toEqual([
+      {
+        cacheHitTokens: 3,
+        callCount: 2,
+        credentialFilename: credential.filename,
+        totalTokens: 43,
+      },
+    ]);
 
     const filtered = await getUsageAnalytics({
-      accessKey: accessKey.access_key.id,
-      credential: credential.filename,
+      accessKey: [accessKey.access_key.id, 'missing-key'],
+      credential: [credential.filename, 'missing-credential.json'],
       now,
       range: 'today',
     });
@@ -663,6 +680,19 @@ describe('debug and usage persistence', () => {
     expect(filtered.tableRows[0].model).toBe('gpt-5.5');
     expect(filtered.callSeries[0].points).toHaveLength(24);
     expect(filtered.tokenSeries[0].points).toHaveLength(24);
+    expect(filtered.rangeSummary).toEqual({
+      cacheHitTokens: 3,
+      callCount: 1,
+      totalTokens: 23,
+    });
+    expect(filtered.credentialRows).toEqual([
+      {
+        cacheHitTokens: 3,
+        callCount: 1,
+        credentialFilename: credential.filename,
+        totalTokens: 23,
+      },
+    ]);
 
     expect(
       (

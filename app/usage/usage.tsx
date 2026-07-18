@@ -6,12 +6,16 @@ import { Table } from 'antd';
 import type { TableColumnsType, TableProps } from 'antd';
 import { atom } from 'jotai';
 import {
-  ChartLine,
+  Braces,
   ChartNoAxesCombined,
+  Coins,
+  DatabaseZap,
+  KeyRound,
   LoaderCircle,
   RefreshCw,
   Trash2,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { createContext, useContext, useMemo, useState } from 'react';
 
@@ -38,11 +42,26 @@ export interface UsageTableRow {
   totalTokens: number;
 }
 
+export interface CredentialUsageRow {
+  cacheHitTokens: number;
+  callCount: number;
+  credentialFilename: string;
+  totalTokens: number;
+}
+
 type UsageTableSortKey = 'cacheHitTokens' | 'callCount' | 'totalTokens';
 
 type UsageTableSort = {
   direction: 'asc' | 'desc';
   key: UsageTableSortKey;
+} | null;
+
+type CredentialUsageTableSortKey =
+  'cacheHitTokens' | 'callCount' | 'totalTokens';
+
+type CredentialUsageTableSort = {
+  direction: 'asc' | 'desc';
+  key: CredentialUsageTableSortKey;
 } | null;
 
 export interface UsageFilterOption {
@@ -60,6 +79,7 @@ export interface UsageState {
   autoRefreshSeconds: number;
   autoRefreshVisible: boolean;
   callSeries: UsageChartSeries[];
+  credentialRows: CredentialUsageRow[];
   filters: {
     accessKeys: UsageFilterOption[];
     credentials: UsageFilterOption[];
@@ -77,7 +97,7 @@ export interface UsageState {
   loading: boolean;
   request: UsageFiltersState;
   tableRows: UsageTableRow[];
-  todaySummary: {
+  rangeSummary: {
     cacheHitTokens: number;
     callCount: number;
     totalTokens: number;
@@ -91,8 +111,9 @@ export interface AdminUsageSnapshot {
   filters: UsageState['filters'];
   range: UsageRange;
   request?: UsageFiltersState;
+  credentialRows: CredentialUsageRow[];
   tableRows: UsageTableRow[];
-  todaySummary: UsageState['todaySummary'];
+  rangeSummary: UsageState['rangeSummary'];
   tokenSeries: UsageChartSeries[];
   updatedAtLabel: string;
 }
@@ -105,13 +126,14 @@ export const defaultUsageState: UsageState = {
   autoRefreshSeconds: 15,
   autoRefreshVisible: true,
   callSeries: [],
+  credentialRows: [],
   filters: { accessKeys: [], credentials: [] },
   hoveredPoint: null,
   lastUpdatedAt: '',
   loading: true,
   request: { accessKey: [], credential: [], range: '24h' },
   tableRows: [],
-  todaySummary: { cacheHitTokens: 0, callCount: 0, totalTokens: 0 },
+  rangeSummary: { cacheHitTokens: 0, callCount: 0, totalTokens: 0 },
   tokenSeries: [],
 };
 
@@ -124,6 +146,7 @@ export const createUsageState = (initialData: UsageInitialData): UsageState => {
       initialData.usage?.autoRefreshSeconds ??
       defaultUsageState.autoRefreshSeconds,
     callSeries: initialData.usage?.callSeries ?? [],
+    credentialRows: initialData.usage?.credentialRows ?? [],
     filters: initialData.usage?.filters ?? defaultUsageState.filters,
     lastUpdatedAt: initialData.usage?.updatedAtLabel ?? '',
     loading: false,
@@ -133,8 +156,8 @@ export const createUsageState = (initialData: UsageInitialData): UsageState => {
       range: initialData.usage?.range ?? '24h',
     },
     tableRows: initialData.usage?.tableRows ?? [],
-    todaySummary:
-      initialData.usage?.todaySummary ?? defaultUsageState.todaySummary,
+    rangeSummary:
+      initialData.usage?.rangeSummary ?? defaultUsageState.rangeSummary,
     tokenSeries: initialData.usage?.tokenSeries ?? [],
   };
 };
@@ -207,10 +230,14 @@ const getDistinctChartColors = (models: string[]): Map<string, string> => {
   });
 
   if (typeof window !== 'undefined') {
-    window.localStorage.setItem(
-      usageModelColorsStorageKey,
-      JSON.stringify({ ...storedColors, ...Object.fromEntries(colors) }),
-    );
+    try {
+      window.localStorage.setItem(
+        usageModelColorsStorageKey,
+        JSON.stringify({ ...storedColors, ...Object.fromEntries(colors) }),
+      );
+    } catch {
+      // Keep the in-memory colors when browser storage is unavailable.
+    }
   }
 
   return colors;
@@ -282,6 +309,7 @@ const UsageChart = ({
   chartWidth: width,
   emptyLabel,
   hoveredPoint,
+  icon: Icon,
   locale,
   metric,
   metricLabel,
@@ -293,6 +321,7 @@ const UsageChart = ({
   chartWidth: number;
   emptyLabel: string;
   hoveredPoint: UsageState['hoveredPoint'];
+  icon: LucideIcon;
   locale: string;
   metric: 'callCount' | 'totalTokens';
   metricLabel: string;
@@ -334,7 +363,7 @@ const UsageChart = ({
   return (
     <Block direction="vertical" gap={16} padding={24} variant="outlined">
       <Flexbox align="center" gap={8} horizontal>
-        <ChartLine aria-hidden="true" size={18} strokeWidth={2} />
+        <Icon aria-hidden="true" size={18} strokeWidth={2} />
         <h3 className="section-title">{title}</h3>
       </Flexbox>
       {series.length && pointCount ? (
@@ -496,15 +525,7 @@ const UsageChart = ({
           ) : null}
         </div>
       ) : (
-        <Flexbox
-          align="center"
-          className="py-12 text-secondary"
-          direction="vertical"
-          gap={8}
-        >
-          <ChartLine aria-hidden="true" size={18} strokeWidth={2} />
-          <div className="mt-2">{emptyLabel}</div>
-        </Flexbox>
+        <div className="py-12 text-center text-secondary">{emptyLabel}</div>
       )}
     </Block>
   );
@@ -552,6 +573,8 @@ const Usage = () => {
     }))
     .filter((option) => option.value !== 'all');
   const [tableSort, setTableSort] = useState<UsageTableSort>(null);
+  const [credentialTableSort, setCredentialTableSort] =
+    useState<CredentialUsageTableSort>(null);
   const sortedTableRows = useMemo(() => {
     if (!tableSort) return usage.tableRows;
 
@@ -562,6 +585,19 @@ const Usage = () => {
         left.model.localeCompare(right.model),
     );
   }, [tableSort, usage.tableRows]);
+  const sortedCredentialRows = useMemo(() => {
+    if (!credentialTableSort) return usage.credentialRows;
+
+    const direction = credentialTableSort.direction === 'asc' ? 1 : -1;
+    const { key } = credentialTableSort;
+
+    return [...usage.credentialRows].sort((left, right) => {
+      return (
+        (left[key] - right[key]) * direction ||
+        left.credentialFilename.localeCompare(right.credentialFilename)
+      );
+    });
+  }, [credentialTableSort, usage.credentialRows]);
   const tableColumns: TableColumnsType<UsageTableRow> = [
     {
       dataIndex: 'model',
@@ -614,6 +650,58 @@ const Usage = () => {
       title: translations('tableCacheHit'),
     },
   ];
+  const credentialColumns: TableColumnsType<CredentialUsageRow> = [
+    {
+      dataIndex: 'credentialFilename',
+      key: 'credentialFilename',
+      title: translations('tableCredential'),
+    },
+    {
+      align: 'right',
+      dataIndex: 'callCount',
+      key: 'callCount',
+      render: (value: number) => formatNumber(locale, value),
+      sortDirections: ['ascend', 'descend', null],
+      sortOrder:
+        credentialTableSort?.key === 'callCount'
+          ? credentialTableSort.direction === 'asc'
+            ? 'ascend'
+            : 'descend'
+          : null,
+      sorter: true,
+      title: translations('tableCalls'),
+    },
+    {
+      align: 'right',
+      dataIndex: 'totalTokens',
+      key: 'totalTokens',
+      render: (value: number) => formatNumber(locale, value),
+      sortDirections: ['ascend', 'descend', null],
+      sortOrder:
+        credentialTableSort?.key === 'totalTokens'
+          ? credentialTableSort.direction === 'asc'
+            ? 'ascend'
+            : 'descend'
+          : null,
+      sorter: true,
+      title: translations('tableTokens'),
+    },
+    {
+      align: 'right',
+      dataIndex: 'cacheHitTokens',
+      key: 'cacheHitTokens',
+      render: (value: number) => formatNumber(locale, value),
+      sortDirections: ['ascend', 'descend', null],
+      sortOrder:
+        credentialTableSort?.key === 'cacheHitTokens'
+          ? credentialTableSort.direction === 'asc'
+            ? 'ascend'
+            : 'descend'
+          : null,
+      sorter: true,
+      title: translations('tableCacheHit'),
+    },
+  ];
   const handleTableChange: TableProps<UsageTableRow>['onChange'] = (
     _pagination,
     _filters,
@@ -634,20 +722,39 @@ const Usage = () => {
       key,
     });
   };
+  const handleCredentialTableChange: TableProps<CredentialUsageRow>['onChange'] =
+    (_pagination, _filters, sorter) => {
+      const nextSorter = Array.isArray(sorter) ? sorter[0] : sorter;
+      const key = nextSorter.columnKey;
+      const isSortableKey =
+        key === 'callCount' ||
+        key === 'totalTokens' ||
+        key === 'cacheHitTokens';
+
+      if (!isSortableKey || !nextSorter.order) {
+        setCredentialTableSort(null);
+        return;
+      }
+
+      setCredentialTableSort({
+        direction: nextSorter.order === 'ascend' ? 'asc' : 'desc',
+        key,
+      });
+    };
 
   return (
     <div className="block" id="usage">
       <div className="flex flex-col">
         <Block
-          className="order-2 mb-6"
+          className="mb-6"
           direction="vertical"
           gap={16}
           padding={24}
           variant="outlined"
         >
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-4 flex-1">
-              <label className="block">
+          <div className="usage-filter-toolbar">
+            <div className="usage-filter-fields">
+              <label className="usage-filter-range">
                 <div className="mb-2 text-sm font-medium text-text-light dark:text-text-dark">
                   {translations('range')}
                 </div>
@@ -659,7 +766,7 @@ const Usage = () => {
                   value={usage.request.range}
                 />
               </label>
-              <label className="block">
+              <label className="usage-filter-select">
                 <div className="mb-2 text-sm font-medium text-text-light dark:text-text-dark">
                   {translations('credential')}
                 </div>
@@ -667,17 +774,20 @@ const Usage = () => {
                   allowClear
                   aria-label={translations('credential')}
                   className="w-full"
+                  classNames={{ value: 'usage-filter-value' }}
                   mode="multiple"
                   onChange={(value) =>
                     onCredentialChange(getFilterValues(value))
                   }
                   options={credentialOptions}
+                  popupClassName="usage-filter-dropdown"
+                  popupMatchSelectWidth
                   placeholder={translations('credentialPlaceholder')}
                   showSearch
                   value={usage.request.credential}
                 />
               </label>
-              <label className="block">
+              <label className="usage-filter-select">
                 <div className="mb-2 text-sm font-medium text-text-light dark:text-text-dark">
                   {translations('accessKey')}
                 </div>
@@ -685,11 +795,14 @@ const Usage = () => {
                   allowClear
                   aria-label={translations('accessKey')}
                   className="w-full"
+                  classNames={{ value: 'usage-filter-value' }}
                   mode="multiple"
                   onChange={(value) =>
                     onAccessKeyChange(getFilterValues(value))
                   }
                   options={accessKeyOptions}
+                  popupClassName="usage-filter-dropdown"
+                  popupMatchSelectWidth
                   placeholder={translations('accessKeyPlaceholder')}
                   showSearch
                   value={usage.request.accessKey}
@@ -715,17 +828,13 @@ const Usage = () => {
               </Button>
             </div>
           </div>
-          <div className="mt-4 flex flex-col gap-2 text-sm text-secondary">
-            <span>
-              {usage.lastUpdatedAt
-                ? translations('lastUpdated', { value: usage.lastUpdatedAt })
-                : translations('firstLoad')}
-            </span>
+          <div className="usage-filter-status">
             {usage.autoRefreshVisible ? (
-              <label className="flex items-center gap-2 whitespace-nowrap">
+              <label className="usage-auto-refresh-control">
                 <span>{translations('autoRefresh')}</span>
                 <Select
                   aria-label={translations('autoRefresh')}
+                  className="usage-auto-refresh-select"
                   onChange={(value) =>
                     onAutoRefreshSecondsChange(Number(value))
                   }
@@ -734,14 +843,31 @@ const Usage = () => {
                 />
               </label>
             ) : null}
+            <span>
+              {usage.lastUpdatedAt
+                ? translations('lastUpdated', { value: usage.lastUpdatedAt })
+                : translations('firstLoad')}
+            </span>
           </div>
         </Block>
-        <div className="order-1 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-6 mb-6">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-6 mb-6">
           {[
-            [translations('callsToday'), usage.todaySummary.callCount],
-            [translations('tokensToday'), usage.todaySummary.totalTokens],
-            [translations('cacheHitToday'), usage.todaySummary.cacheHitTokens],
-          ].map(([label, value]) => (
+            {
+              icon: Braces,
+              label: translations('summaryCalls'),
+              value: usage.rangeSummary.callCount,
+            },
+            {
+              icon: Coins,
+              label: translations('summaryTokens'),
+              value: usage.rangeSummary.totalTokens,
+            },
+            {
+              icon: DatabaseZap,
+              label: translations('summaryCacheHit'),
+              value: usage.rangeSummary.cacheHitTokens,
+            },
+          ].map(({ icon: Icon, label, value }) => (
             <Block
               direction="vertical"
               gap={8}
@@ -749,9 +875,17 @@ const Usage = () => {
               padding={24}
               variant="outlined"
             >
-              <div className="text-sm text-secondary mb-2">{label}</div>
+              <Flexbox
+                align="center"
+                className="mb-2 text-secondary"
+                gap={8}
+                horizontal
+              >
+                <Icon aria-hidden="true" size={18} strokeWidth={2} />
+                <div className="text-sm">{label}</div>
+              </Flexbox>
               <div className="text-3xl font-bold text-text-light dark:text-text-dark">
-                {formatNumber(locale, Number(value))}
+                {formatNumber(locale, value)}
               </div>
             </Block>
           ))}
@@ -763,6 +897,7 @@ const Usage = () => {
           chartWidth={1000}
           emptyLabel={translations('emptyCalls')}
           hoveredPoint={usage.hoveredPoint}
+          icon={Braces}
           locale={locale}
           metric="callCount"
           metricLabel={translations('metricCalls')}
@@ -775,6 +910,7 @@ const Usage = () => {
           chartWidth={1000}
           emptyLabel={translations('emptyTokens')}
           hoveredPoint={usage.hoveredPoint}
+          icon={Coins}
           locale={locale}
           metric="totalTokens"
           metricLabel={translations('metricTokens')}
@@ -789,6 +925,7 @@ const Usage = () => {
           chartWidth={320}
           emptyLabel={translations('emptyCalls')}
           hoveredPoint={usage.hoveredPoint}
+          icon={Braces}
           locale={locale}
           metric="callCount"
           metricLabel={translations('metricCalls')}
@@ -801,6 +938,7 @@ const Usage = () => {
           chartWidth={320}
           emptyLabel={translations('emptyTokens')}
           hoveredPoint={usage.hoveredPoint}
+          icon={Coins}
           locale={locale}
           metric="totalTokens"
           metricLabel={translations('metricTokens')}
@@ -809,6 +947,28 @@ const Usage = () => {
           title={translations('tokenTrend')}
         />
       </div>
+      <Block
+        className="mb-6"
+        direction="vertical"
+        gap={16}
+        padding={24}
+        variant="outlined"
+      >
+        <Flexbox align="center" gap={8} horizontal>
+          <KeyRound aria-hidden="true" size={18} strokeWidth={2} />
+          <h3 className="section-title">{translations('credentialSummary')}</h3>
+        </Flexbox>
+        <Table<CredentialUsageRow>
+          columns={credentialColumns}
+          dataSource={sortedCredentialRows}
+          locale={{ emptyText: translations('emptyCredentialSummary') }}
+          onChange={handleCredentialTableChange}
+          pagination={false}
+          rowKey="credentialFilename"
+          scroll={{ x: true }}
+          size="middle"
+        />
+      </Block>
       <Block direction="vertical" gap={16} padding={24} variant="outlined">
         <Flexbox align="center" gap={8} horizontal>
           <ChartNoAxesCombined aria-hidden="true" size={18} strokeWidth={2} />

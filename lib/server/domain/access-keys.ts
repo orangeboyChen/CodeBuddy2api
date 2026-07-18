@@ -206,8 +206,12 @@ const mutateAccessKeyStore = async <T>(
 };
 
 const maskSecret = (secret: string): string => {
+  if (secret.length <= 4) {
+    return '****';
+  }
+
   if (secret.length <= 12) {
-    return `${secret.slice(0, 4)}${'*'.repeat(secret.length - 4)}`;
+    return `${secret.slice(0, 4)}${'*'.repeat(Math.max(4, secret.length - 4))}`;
   }
 
   return `${secret.slice(0, 8)}${'*'.repeat(secret.length - 12)}${secret.slice(-4)}`;

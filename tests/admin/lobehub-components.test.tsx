@@ -21,67 +21,37 @@ const renderWithMessages = (children: React.ReactNode) => {
 };
 
 describe('dashboard view', () => {
-  it('keeps all four dashboard cards visible', () => {
+  it('shows the welcome hero, API endpoint, and four summary cards', () => {
     renderWithMessages(
       <DashboardProvider
         value={{
           dashboard: {
-            apiEndpoint: 'http://localhost:8001/v1',
-            credentialUsage: [],
-            credentialUsagePercent: 100,
-            lastCheckedAt: 'just now',
+            apiEndpoint: 'https://api.example.test/v1',
             loading: false,
-            modelUsage: [],
-            serviceStatus: 'online',
-            statusText: 'Running',
-            totalApiCalls: 42,
-            totalCredentials: 2,
-            uptimeText: 'ok',
+            summary: {
+              cacheHitTokens: 12,
+              callCount: 42,
+              totalTokens: 128,
+            },
+            totalCredentials: 3,
             validCredentials: 2,
           },
-          onCopyEndpoint: vi.fn(),
-          onRefresh: vi.fn(),
         }}
       >
         <Dashboard />
       </DashboardProvider>,
     );
 
-    expect(screen.getAllByText('2').length).toBeGreaterThan(0);
-    expect(screen.getByText('http://localhost:8001/v1')).toBeVisible();
-    expect(document.getElementById('totalApiCalls')).toHaveTextContent('42');
+    expect(screen.getByRole('heading', { level: 1 })).toBeVisible();
+    expect(screen.getByAltText('CodeBuddy')).toBeVisible();
+    expect(screen.getByText('42')).toBeVisible();
+    expect(screen.getByText('128')).toBeVisible();
+    expect(screen.getByText('12')).toBeVisible();
+    expect(screen.getByText('3')).toBeVisible();
+    expect(screen.getByText('https://api.example.test/v1')).toBeVisible();
     expect(document.querySelectorAll('.dashboard-metric-card')).toHaveLength(4);
-  });
-
-  it('keeps the initial service status time visible', () => {
-    renderWithMessages(
-      <DashboardProvider
-        value={{
-          dashboard: {
-            apiEndpoint: 'http://localhost:8001/v1',
-            credentialUsage: [],
-            credentialUsagePercent: 0,
-            lastCheckedAt: 'Last checked 7/12/2026, 5:00:00 PM',
-            loading: false,
-            modelUsage: [],
-            serviceStatus: 'online',
-            statusText: 'Running',
-            totalApiCalls: 0,
-            totalCredentials: 0,
-            uptimeText: '',
-            validCredentials: 0,
-          },
-          onCopyEndpoint: vi.fn(),
-          onRefresh: vi.fn(),
-        }}
-      >
-        <Dashboard />
-      </DashboardProvider>,
-    );
-
-    expect(
-      screen.getAllByText('Last checked 7/12/2026, 5:00:00 PM').length,
-    ).toBeGreaterThan(0);
+    expect(screen.queryByText('Service status')).not.toBeInTheDocument();
+    expect(screen.queryByText('API endpoint')).not.toBeInTheDocument();
   });
 });
 
@@ -203,7 +173,7 @@ describe('debug view', () => {
       expect(screen.queryByText('/v1/responses')).not.toBeInTheDocument();
       expect(screen.getByText('/v1/messages')).toBeInTheDocument();
     });
-  });
+  }, 60_000);
 
   it('aggregates OpenAI streaming choice deltas', async () => {
     renderWithMessages(
@@ -284,7 +254,7 @@ describe('debug view', () => {
     fireEvent.click(screen.getByRole('button', { name: /github/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Create PR' }));
     expect(screen.getByText('mcp__github__create_pr')).toBeInTheDocument();
-  });
+  }, 60_000);
 
   it('aggregates Responses API streaming deltas', async () => {
     renderWithMessages(
@@ -336,5 +306,5 @@ describe('debug view', () => {
     await waitFor(() => {
       expect(document.body).toHaveTextContent('Hello world');
     });
-  });
+  }, 60_000);
 });

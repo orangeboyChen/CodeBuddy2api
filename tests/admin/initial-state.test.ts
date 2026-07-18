@@ -6,16 +6,13 @@ import { createDashboardState } from '@/app/dashboard/dashboard';
 
 const createDashboardInitialData = (): DashboardInitialData => {
   return {
-    apiEndpoint: 'http://localhost:8001/v1',
-    credentials: [],
-    health: {
-      checkedAtLabel: '',
-      status: 'healthy',
-      timestamp: '2026-07-12T09:00:00.000Z',
-      uptimeText: '',
-    },
-    stats: { credential_usage: {}, model_usage: {} },
+    apiEndpoint: 'https://api.example.test/v1',
     tab: 'dashboard',
+    totalCredentials: 3,
+    validCredentials: 2,
+    usage: {
+      rangeSummary: { cacheHitTokens: 3, callCount: 2, totalTokens: 9 },
+    },
   };
 };
 
@@ -29,10 +26,16 @@ const createApiTestInitialData = (): ApiTestInitialData => {
 };
 
 describe('admin initial state', () => {
-  it('keeps the service status time visible on the first render', () => {
-    expect(createDashboardState(createDashboardInitialData()).uptimeText).toBe(
-      '2026-07-12T09:00:00.000Z',
-    );
+  it('hydrates the fixed today usage summary', () => {
+    const state = createDashboardState(createDashboardInitialData());
+
+    expect(state.summary).toEqual({
+      cacheHitTokens: 3,
+      callCount: 2,
+      totalTokens: 9,
+    });
+    expect(state.totalCredentials).toBe(3);
+    expect(state.validCredentials).toBe(2);
   });
 
   it('selects the current valid credential for API testing', () => {

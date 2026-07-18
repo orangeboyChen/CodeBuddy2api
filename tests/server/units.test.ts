@@ -651,7 +651,7 @@ describe('server units', () => {
         totalTokens: 8,
       },
     ]);
-    expect(filtered.todaySummary.callCount).toBe(0);
+    expect(filtered.rangeSummary.callCount).toBe(1);
   });
 
   it('sanitizes invalid persisted usage records and clears usage history', async () => {

@@ -1076,7 +1076,7 @@ describe('server runtime', () => {
       )
     ).json();
     expect(clearedPayload.tableRows).toEqual([]);
-    expect(clearedPayload.todaySummary).toEqual({
+    expect(clearedPayload.rangeSummary).toEqual({
       callCount: 0,
       cacheHitTokens: 0,
       totalTokens: 0,

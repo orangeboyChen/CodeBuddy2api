@@ -68,6 +68,10 @@ export interface UsageTableRow extends UsageBucketTotals {
   model: string;
 }
 
+export interface CredentialUsageRow extends UsageBucketTotals {
+  credentialFilename: string;
+}
+
 export type UsageSummary = UsageBucketTotals;
 
 export interface UsageFilterOption {
@@ -83,11 +87,12 @@ export interface UsageFilterOptions {
 export interface UsageAnalyticsResponse {
   callSeries: UsageChartSeries[];
   credentialCallCounts: Record<string, number>;
+  credentialRows: CredentialUsageRow[];
   filters: UsageFilterOptions;
   range: UsageRange;
+  rangeSummary: UsageSummary;
   tableRows: UsageTableRow[];
   tokenSeries: UsageChartSeries[];
-  todaySummary: UsageSummary;
 }
 
 const USAGE_NAMESPACE = 'usage';
@@ -453,18 +458,6 @@ const getBucketIndex = (
   return index;
 };
 
-const getTodayBounds = (now: Date) => {
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-
-  return {
-    endMs: end.getTime(),
-    startMs: start.getTime(),
-  };
-};
-
 const matchesFilter = (
   event: UsageEventRecord,
   accessKey: string | string[],
@@ -604,9 +597,9 @@ export const getUsageAnalytics = async ({
     const tokenSeriesByModel = new Map<string, UsageBucketTotals[]>();
     const callSeriesByModel = new Map<string, UsageBucketTotals[]>();
     const tableRowsByModel = new Map<string, UsageBucketTotals>();
+    const credentialRowsByFilename = new Map<string, UsageBucketTotals>();
     const credentialCallCounts: Record<string, number> = {};
-    const todaySummary = createEmptyTotals();
-    const todayBounds = getTodayBounds(now);
+    const rangeSummary = createEmptyTotals();
     const { endMs, startMs } = getRangeWindow(range, now);
 
     store.events.forEach((event) => {
@@ -624,13 +617,6 @@ export const getUsageAnalytics = async ({
         credentialCallCounts[event.credentialFilename] =
           (credentialCallCounts[event.credentialFilename] ?? 0) +
           event.callCount;
-      }
-
-      if (eventMs >= todayBounds.startMs && eventMs < todayBounds.endMs) {
-        const nextTodaySummary = addEventToTotals(todaySummary, event);
-        todaySummary.callCount = nextTodaySummary.callCount;
-        todaySummary.cacheHitTokens = nextTodaySummary.cacheHitTokens;
-        todaySummary.totalTokens = nextTodaySummary.totalTokens;
       }
 
       if (eventMs < startMs || eventMs >= endMs) {
@@ -651,6 +637,21 @@ export const getUsageAnalytics = async ({
         createEmptyBucketTotals(buckets.length);
       const tableTotals =
         tableRowsByModel.get(event.model) ?? createEmptyTotals();
+
+      const nextRangeSummary = addEventToTotals(rangeSummary, event);
+      rangeSummary.callCount = nextRangeSummary.callCount;
+      rangeSummary.cacheHitTokens = nextRangeSummary.cacheHitTokens;
+      rangeSummary.totalTokens = nextRangeSummary.totalTokens;
+
+      if (event.credentialFilename) {
+        const credentialTotals =
+          credentialRowsByFilename.get(event.credentialFilename) ??
+          createEmptyTotals();
+        credentialRowsByFilename.set(
+          event.credentialFilename,
+          addEventToTotals(credentialTotals, event),
+        );
+      }
 
       tokenBuckets[bucketIndex] = addEventToTotals(
         tokenBuckets[bucketIndex],
@@ -723,6 +724,12 @@ export const getUsageAnalytics = async ({
     return {
       callSeries: toSeries(callSeriesByModel),
       credentialCallCounts,
+      credentialRows: [...credentialRowsByFilename.entries()]
+        .map(([credentialFilename, totals]) => ({
+          ...totals,
+          credentialFilename,
+        }))
+        .sort((left, right) => right.totalTokens - left.totalTokens),
       filters: {
         accessKeys: mergeFilterOptions(
           [
@@ -752,13 +759,13 @@ export const getUsageAnalytics = async ({
         ),
       },
       range,
+      rangeSummary,
       tableRows: [...tableRowsByModel.entries()]
         .map(([model, totals]) => ({
           ...totals,
           model,
         }))
         .sort((left, right) => right.totalTokens - left.totalTokens),
-      todaySummary,
       tokenSeries: toSeries(tokenSeriesByModel),
     };
   });

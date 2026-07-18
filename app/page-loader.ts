@@ -7,9 +7,7 @@ import type {
 } from '@/app/credentials/credentials';
 import type {
   AdminConsoleInitialData,
-  AdminHealthState,
   AdminSettingsSnapshot,
-  AdminStatsState,
   TabKey,
 } from '@/app/page-data';
 import type { UsageFiltersState } from '@/app/usage/usage';
@@ -21,9 +19,7 @@ import {
   listCredentials,
 } from '@/lib/server/domain/credentials';
 import { getDebugSettings, listDebugLogs } from '@/lib/server/domain/debug';
-import { getUsageStats } from '@/lib/server/domain/stats';
 import { getUsageAnalytics } from '@/lib/server/domain/usage';
-import { getMessages } from '@/lib/i18n/messages';
 import type { AppLocale } from '@/lib/i18n/routing';
 
 const defaultUsageRequest: UsageFiltersState = {
@@ -48,23 +44,6 @@ const buildApiEndpoint = async () => {
 
   return `${protocol}://${host}/v1`;
 };
-
-const formatInitialHealthLabel = (locale: AppLocale, timestamp: string) => {
-  const checkedAt = new Date(timestamp).toLocaleString(locale);
-  const { serviceCheckedAt } = getMessages(locale).Admin.console;
-
-  return `${serviceCheckedAt} ${checkedAt}`;
-};
-
-const createHealth = (
-  locale: AppLocale,
-  timestamp: string,
-): AdminHealthState => ({
-  checkedAtLabel: formatInitialHealthLabel(locale, timestamp),
-  status: 'healthy',
-  timestamp,
-  uptimeText: formatInitialHealthLabel(locale, timestamp),
-});
 
 const createDebugSnapshot = async () => {
   const [debugSettings, debugLogs] = await Promise.all([
@@ -107,19 +86,20 @@ export const getInitialData = async ({
 }: InitialDataRequest): Promise<AdminConsoleInitialData> => {
   switch (tab) {
     case 'dashboard': {
-      const timestamp = new Date().toISOString();
-      const [apiEndpoint, credentials, stats] = await Promise.all([
+      const [apiEndpoint, credentials, usage] = await Promise.all([
         buildApiEndpoint(),
         listCredentials(),
-        getUsageStats(),
+        getUsageAnalytics({ range: 'today' }),
       ]);
 
       return {
         apiEndpoint,
-        credentials: credentials.credentials as unknown as CredentialSummary[],
-        health: createHealth(locale, timestamp),
-        stats: stats as AdminStatsState,
         tab,
+        totalCredentials: credentials.credentials.length,
+        validCredentials: credentials.credentials.filter(
+          (credential) => !credential.is_expired,
+        ).length,
+        usage: { rangeSummary: usage.rangeSummary },
       };
     }
     case 'usage': {

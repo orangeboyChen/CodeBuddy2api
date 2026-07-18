@@ -616,8 +616,13 @@ export const updateAdminSessionUsagePreferences = async (
   const normalizedPreferences = normalizeUsagePreferences(preferences);
   const token = getSessionToken(request);
 
-  if (!normalizedPreferences || !token) {
+  if (!normalizedPreferences) {
     return null;
+  }
+
+  if (!token) {
+    const state = pruneExpiredState(await loadAdminAuthStateAsync());
+    return state.enabled ? null : normalizedPreferences;
   }
 
   const tokenHash = hashSessionToken(token);

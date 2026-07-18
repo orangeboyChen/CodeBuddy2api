@@ -98,6 +98,22 @@ describe('admin auth and storage', () => {
     expect(
       await getAdminSessionErrorResponse(makeRequest('/admin-api/settings')),
     ).toBeNull();
+    expect(
+      await updateAdminSessionUsagePreferences(
+        makeRequest('/admin-api/usage'),
+        {
+          accessKey: [],
+          autoRefreshSeconds: 30,
+          credential: [],
+          range: 'today',
+        },
+      ),
+    ).toEqual({
+      accessKey: [],
+      autoRefreshSeconds: 30,
+      credential: [],
+      range: 'today',
+    });
 
     const shortPasswordResponse = await setupAdminPassword(
       makeRequest('/admin-api/auth/setup'),

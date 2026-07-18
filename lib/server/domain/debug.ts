@@ -146,15 +146,23 @@ const maskSensitiveString = (value: string): string => {
       return '';
     }
 
+    if (token.length <= 4) {
+      return '****';
+    }
+
     if (token.length <= 12) {
-      return `${token.slice(0, 4)}${'*'.repeat(token.length - 4)}`;
+      return `${token.slice(0, 4)}${'*'.repeat(Math.max(4, token.length - 4))}`;
     }
 
     return `${token.slice(0, 8)}${'*'.repeat(token.length - 12)}${token.slice(-4)}`;
   }
 
+  if (trimmed.length <= 4) {
+    return '****';
+  }
+
   if (trimmed.length <= 12) {
-    return `${trimmed.slice(0, 4)}${'*'.repeat(trimmed.length - 4)}`;
+    return `${trimmed.slice(0, 4)}${'*'.repeat(Math.max(4, trimmed.length - 4))}`;
   }
 
   return `${trimmed.slice(0, 8)}${'*'.repeat(trimmed.length - 12)}${trimmed.slice(-4)}`;
