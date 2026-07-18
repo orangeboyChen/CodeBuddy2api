@@ -15,6 +15,7 @@ import {
   setDebugUpstreamRequest,
   updateDebugSettings,
 } from '@/lib/server/domain/debug';
+import type { DebugTrace } from '@/lib/server/domain/debug';
 import {
   addCredential,
   resetCredentialRuntimeState,
@@ -41,6 +42,26 @@ const cleanupTempState = (): void => {
 const writeJson = (filePath: string, value: unknown): void => {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify(value, null, 2));
+};
+
+const enqueueAndConsumeUpstreamSnapshot = async (
+  trace: DebugTrace | undefined,
+  response: Response,
+): Promise<void> => {
+  await enqueueUpstreamResponseSnapshot(trace, response).text();
+};
+
+const finalizeAndConsumeDebugTrace = async (
+  trace: DebugTrace | undefined,
+  response: Response,
+): Promise<void> => {
+  await finalizeDebugTrace(trace, response).text();
+};
+
+const waitForDebugLogs = async (
+  assertion: () => Promise<void>,
+): Promise<void> => {
+  await vi.waitFor(assertion, { timeout: 2_000 });
 };
 
 describe('debug and usage persistence', () => {
@@ -154,7 +175,7 @@ describe('debug and usage persistence', () => {
     });
 
     enqueueUpstreamResponseSnapshot(undefined, new Response('ignored'));
-    enqueueUpstreamResponseSnapshot(
+    await enqueueAndConsumeUpstreamSnapshot(
       trace,
       Response.json(
         {
@@ -169,7 +190,7 @@ describe('debug and usage persistence', () => {
         },
       ),
     );
-    finalizeDebugTrace(
+    await finalizeAndConsumeDebugTrace(
       trace,
       new Response('plain response', {
         headers: {
@@ -180,7 +201,7 @@ describe('debug and usage persistence', () => {
       }),
     );
 
-    await vi.waitFor(async () => {
+    await waitForDebugLogs(async () => {
       expect(await listDebugLogs()).toHaveLength(1);
     });
 
@@ -218,7 +239,7 @@ describe('debug and usage persistence', () => {
       usage: null,
     });
 
-    finalizeDebugTrace(undefined, new Response('ignored'));
+    await finalizeAndConsumeDebugTrace(undefined, new Response('ignored'));
     await clearDebugLogs();
     expect(await listDebugLogs()).toEqual([]);
 
@@ -245,7 +266,7 @@ describe('debug and usage persistence', () => {
         route: '/v1/responses',
       });
 
-      enqueueUpstreamResponseSnapshot(
+      await enqueueAndConsumeUpstreamSnapshot(
         trace,
         Response.json({
           usage: {
@@ -255,7 +276,7 @@ describe('debug and usage persistence', () => {
           },
         }),
       );
-      finalizeDebugTrace(trace, new Response('completed'));
+      await finalizeAndConsumeDebugTrace(trace, new Response('completed'));
 
       await vi.runAllTicks();
       expect(hasPendingDebugLogWrites()).toBe(true);
@@ -279,7 +300,7 @@ describe('debug and usage persistence', () => {
     }
   });
 
-  it('truncates response snapshots while reading the cloned stream', async () => {
+  it('truncates response snapshots while streaming to the client', async () => {
     await updateDebugSettings({ enabled: true, maxEntries: 10 });
     const trace = createDebugTrace({
       requestBody: {},
@@ -287,14 +308,14 @@ describe('debug and usage persistence', () => {
       route: '/v1/responses',
     });
 
-    finalizeDebugTrace(
+    await finalizeAndConsumeDebugTrace(
       trace,
       new Response(`${'a'.repeat(200_000)}tail`, {
         headers: { 'Content-Type': 'text/plain' },
       }),
     );
 
-    await vi.waitFor(async () => {
+    await waitForDebugLogs(async () => {
       expect(await listDebugLogs()).toHaveLength(1);
     });
     const [entry] = await listDebugLogs();
@@ -312,7 +333,7 @@ describe('debug and usage persistence', () => {
       route: '/v1/responses',
     });
 
-    finalizeDebugTrace(
+    await finalizeAndConsumeDebugTrace(
       trace,
       new Response(
         JSON.stringify({
@@ -323,7 +344,7 @@ describe('debug and usage persistence', () => {
       ),
     );
 
-    await vi.waitFor(async () => {
+    await waitForDebugLogs(async () => {
       expect(await listDebugLogs()).toHaveLength(1);
     });
     const [entry] = await listDebugLogs();
@@ -340,7 +361,7 @@ describe('debug and usage persistence', () => {
       route: '/v1/responses',
     });
 
-    finalizeDebugTrace(
+    await finalizeAndConsumeDebugTrace(
       trace,
       new Response(
         `{"access\\u005ftoken":"escaped-snapshot-access-token","payload":"${'a'.repeat(200_000)}"}`,
@@ -348,7 +369,7 @@ describe('debug and usage persistence', () => {
       ),
     );
 
-    await vi.waitFor(async () => {
+    await waitForDebugLogs(async () => {
       expect(await listDebugLogs()).toHaveLength(1);
     });
     const [entry] = await listDebugLogs();
@@ -364,9 +385,12 @@ describe('debug and usage persistence', () => {
       requestKey: null,
       route: '/v1/chat/completions',
     });
-    finalizeDebugTrace(firstTrace, Response.json({ message: 'first' }));
+    await finalizeAndConsumeDebugTrace(
+      firstTrace,
+      Response.json({ message: 'first' }),
+    );
 
-    await vi.waitFor(async () => {
+    await waitForDebugLogs(async () => {
       expect(await listDebugLogs()).toHaveLength(1);
     });
 
@@ -375,9 +399,12 @@ describe('debug and usage persistence', () => {
       requestKey: null,
       route: '/v1/chat/completions',
     });
-    finalizeDebugTrace(secondTrace, Response.json({ message: 'second' }));
+    await finalizeAndConsumeDebugTrace(
+      secondTrace,
+      Response.json({ message: 'second' }),
+    );
 
-    await vi.waitFor(async () => {
+    await waitForDebugLogs(async () => {
       const logs = await listDebugLogs();
       expect(logs).toHaveLength(1);
       expect(logs[0]?.id).toBe(secondTrace.id);
@@ -396,20 +423,20 @@ describe('debug and usage persistence', () => {
       'data: {"usage":{"prompt_tokens":3,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":2}}}\n\n' +
       'data: [DONE]\n\n';
 
-    enqueueUpstreamResponseSnapshot(
+    await enqueueAndConsumeUpstreamSnapshot(
       trace,
       new Response(stream, {
         headers: { 'content-type': 'text/event-stream' },
       }),
     );
-    finalizeDebugTrace(
+    await finalizeAndConsumeDebugTrace(
       trace,
       new Response(stream, {
         headers: { 'content-type': 'text/event-stream' },
       }),
     );
 
-    await vi.waitFor(async () => {
+    await waitForDebugLogs(async () => {
       expect(await listDebugLogs()).toHaveLength(1);
     });
     const [entry] = await listDebugLogs();
@@ -433,20 +460,20 @@ describe('debug and usage persistence', () => {
       'data: {"type":"response.completed","response":{"usage":{"input_tokens":3,"output_tokens":5,"cache_read_input_tokens":2}}}\n\n' +
       'data: [DONE]\n\n';
 
-    enqueueUpstreamResponseSnapshot(
+    await enqueueAndConsumeUpstreamSnapshot(
       trace,
       new Response(stream, {
         headers: { 'content-type': 'text/event-stream' },
       }),
     );
-    finalizeDebugTrace(
+    await finalizeAndConsumeDebugTrace(
       trace,
       new Response(stream, {
         headers: { 'content-type': 'text/event-stream' },
       }),
     );
 
-    await vi.waitFor(async () => {
+    await waitForDebugLogs(async () => {
       expect(await listDebugLogs()).toHaveLength(1);
     });
     const [entry] = await listDebugLogs();
@@ -472,10 +499,13 @@ describe('debug and usage persistence', () => {
       route: '/v1/responses',
     });
 
-    finalizeDebugTrace(firstTrace, Response.json({ ok: true }));
-    finalizeDebugTrace(secondTrace, Response.json({ ok: true }));
+    await finalizeAndConsumeDebugTrace(firstTrace, Response.json({ ok: true }));
+    await finalizeAndConsumeDebugTrace(
+      secondTrace,
+      Response.json({ ok: true }),
+    );
 
-    await vi.waitFor(async () => {
+    await waitForDebugLogs(async () => {
       expect(await listDebugLogs()).toHaveLength(2);
     });
 
@@ -514,9 +544,9 @@ describe('debug and usage persistence', () => {
       requestKey: null,
       route: '/v1/messages',
     });
-    finalizeDebugTrace(trace, Response.json({ ok: true }));
+    await finalizeAndConsumeDebugTrace(trace, Response.json({ ok: true }));
 
-    await vi.waitFor(async () => {
+    await waitForDebugLogs(async () => {
       expect(await listDebugLogs()).toHaveLength(1);
     });
 

@@ -6,15 +6,16 @@ import {
   Flexbox,
   Highlighter,
   Input,
-  List,
   Snippet,
   Tag,
 } from '@lobehub/ui';
 import { Button, Select, Switch } from '@lobehub/ui/base-ui';
+import { MCP } from '@lobehub/icons';
 import {
   Bot,
   Braces,
   Clock3,
+  Copy,
   Database,
   Gauge,
   Info,
@@ -22,7 +23,6 @@ import {
   MessageSquareText,
   RefreshCw,
   Save,
-  Server,
   Sparkles,
   Trash2,
   Wrench,
@@ -136,6 +136,8 @@ const useDebug = (): DebugController => {
 
 type JsonRecord = Record<string, unknown>;
 
+const MAX_VISIBLE_RESPONSE_TEXT_LENGTH = 12_000;
+
 const isRecord = (value: unknown): value is JsonRecord => {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 };
@@ -171,6 +173,25 @@ const parseSseEvents = (value: unknown): string[] | null => {
 const formatValue = (value: unknown): string => {
   if (typeof value === 'string') return value;
   return JSON.stringify(value ?? null, null, 2);
+};
+
+const JsonPayload = ({
+  className,
+  value,
+}: {
+  className?: string;
+  value: unknown;
+}) => {
+  return (
+    <Highlighter
+      className={['debug-json-payload', className].filter(Boolean).join(' ')}
+      language="json"
+      showLanguage={false}
+      variant="outlined"
+    >
+      {formatValue(value)}
+    </Highlighter>
+  );
 };
 
 const formatDuration = (elapsedMs: number): string => {
@@ -240,17 +261,27 @@ const isMcpTool = (tool: JsonRecord): boolean => {
 };
 
 const RawPayload = ({ value }: { value: unknown }) => {
+  const { onCopy } = useDebug();
   const [open, setOpen] = useState(false);
 
   return (
     <div className="mt-3">
-      <Button
-        icon={Braces}
-        onClick={() => setOpen((current) => !current)}
-        size="small"
-      >
-        {open ? 'Hide raw' : 'View raw'}
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          icon={Braces}
+          onClick={() => setOpen((current) => !current)}
+          size="small"
+        >
+          {open ? 'Hide raw' : 'View raw'}
+        </Button>
+        <Button
+          icon={Copy}
+          onClick={() => onCopy(formatValue(value))}
+          size="small"
+        >
+          Copy raw
+        </Button>
+      </div>
       {open ? <RawPayloadContent value={value} /> : null}
     </div>
   );
@@ -262,7 +293,7 @@ const RawPayloadContent = ({ value }: { value: unknown }) => {
   const sseEvents = parseSseEvents(value);
 
   return (
-    <div className="mt-3 grid gap-3">
+    <div className="mt-3 flex flex-col gap-3">
       {sseEvents ? (
         <Collapse
           className="debug-raw-events w-full min-w-0"
@@ -271,14 +302,10 @@ const RawPayloadContent = ({ value }: { value: unknown }) => {
           )}
           items={sseEvents.map((event, index) => ({
             children: (
-              <Highlighter
+              <JsonPayload
                 className="debug-raw-code"
-                language="json"
-                showLanguage={false}
-                variant="outlined"
-              >
-                {formatValue(parseJsonValue(event))}
-              </Highlighter>
+                value={parseJsonValue(event)}
+              />
             ),
             key: `${index}-${event.slice(0, 32)}`,
             label: `Event ${index + 1}`,
@@ -287,14 +314,7 @@ const RawPayloadContent = ({ value }: { value: unknown }) => {
           variant="outlined"
         />
       ) : (
-        <Highlighter
-          className="debug-raw-code"
-          language="json"
-          showLanguage={false}
-          variant="outlined"
-        >
-          {content}
-        </Highlighter>
+        <JsonPayload className="debug-raw-code" value={content} />
       )}
     </div>
   );
@@ -331,7 +351,10 @@ const StructuredUpstreamRequest = ({
   title: string;
   value: unknown;
 }) => {
+  const pageSize = 10;
+  const [expandedToolKeys, setExpandedToolKeys] = useState<string[]>([]);
   const [showAllMessages, setShowAllMessages] = useState(false);
+  const [toolPage, setToolPage] = useState(0);
   const request = parseJsonValue(value);
   const record = isRecord(request) ? request : null;
   const tools = Array.isArray(record?.tools)
@@ -342,7 +365,29 @@ const StructuredUpstreamRequest = ({
     : Array.isArray(record?.input)
       ? record.input
       : [];
+  const toolPageCount = Math.ceil(tools.length / pageSize);
+  const activeToolPage = Math.min(toolPage, Math.max(toolPageCount - 1, 0));
+  const displayedTools = tools.slice(
+    activeToolPage * pageSize,
+    (activeToolPage + 1) * pageSize,
+  );
   const displayedMessages = showAllMessages ? messages : messages.slice(-1);
+  const toolKeys = tools.map((tool, index) => `${getToolName(tool)}-${index}`);
+  const areAllToolsExpanded =
+    toolKeys.length > 0 &&
+    toolKeys.every((key) => expandedToolKeys.includes(key));
+
+  const toggleAllTools = () => {
+    setExpandedToolKeys(areAllToolsExpanded ? [] : toolKeys);
+  };
+
+  const setToolExpanded = (key: string, open: boolean) => {
+    setExpandedToolKeys((current) =>
+      open
+        ? [...new Set([...current, key])]
+        : current.filter((item) => item !== key),
+    );
+  };
 
   return (
     <Block
@@ -354,60 +399,103 @@ const StructuredUpstreamRequest = ({
         {title}
       </div>
       {record ? (
-        <div className="mt-3 grid gap-4 text-sm">
+        <div className="mt-3 flex flex-col gap-4 text-sm">
           {tools.length ? (
-            <div>
-              <div className="mb-2 flex items-center gap-2 font-medium">
-                <Wrench aria-hidden="true" size={16} /> Tools ({tools.length})
+            <div className="w-full">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2 font-medium">
+                <div className="flex items-center gap-2">
+                  <Wrench aria-hidden="true" size={16} /> Tools ({tools.length})
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={toggleAllTools} size="small">
+                    {areAllToolsExpanded ? 'Collapse all' : 'Expand all'}
+                  </Button>
+                </div>
               </div>
-              <List
-                className="debug-tool-list"
-                classNames={{
-                  container: 'debug-tool-item-content',
-                  item: 'debug-tool-item',
-                }}
-                items={tools.map((tool, index) => {
-                  const functionValue = isRecord(tool.function)
-                    ? tool.function
-                    : tool;
-                  return {
-                    addon: (
-                      <Collapse
-                        items={[
-                          {
-                            children: (
-                              <Snippet language="json" variant="outlined">
-                                {formatValue(
-                                  functionValue.parameters ??
-                                    tool.parameters ??
-                                    {},
-                                )}
-                              </Snippet>
-                            ),
-                            key: 'parameters',
-                            label: 'Parameters',
-                          },
-                        ]}
-                        padding={8}
-                        variant="borderless"
-                      />
-                    ),
-                    description: `${String(tool.type ?? 'function')} - ${String(
-                      functionValue.description ?? 'No description',
-                    )}`,
-                    key: `${getToolName(tool)}-${index}`,
-                    title: (
-                      <span className="inline-flex items-center gap-1">
-                        {isMcpTool(tool) ? (
-                          <Server aria-label="MCP tool" size={14} />
-                        ) : null}
-                        {getToolName(tool)}
-                      </span>
-                    ),
-                  };
-                })}
-                padding={0}
-              />
+              <div className="debug-tool-list flex flex-col gap-2">
+                {displayedTools
+                  .map((tool, index) => {
+                    const actualIndex = activeToolPage * pageSize + index;
+                    const functionValue = isRecord(tool.function)
+                      ? tool.function
+                      : tool;
+                    const key = `${getToolName(tool)}-${actualIndex}`;
+                    return {
+                      children: (
+                        <div className="debug-tool-details flex flex-col gap-3">
+                          <div className="debug-tool-description text-sm text-secondary">
+                            {String(tool.type ?? 'function')} -{' '}
+                            {String(
+                              functionValue.description ?? 'No description',
+                            )}
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <div className="text-xs font-medium text-secondary">
+                              Parameters
+                            </div>
+                            <JsonPayload
+                              className="debug-tool-parameters"
+                              value={
+                                functionValue.parameters ??
+                                tool.parameters ??
+                                {}
+                              }
+                            />
+                          </div>
+                        </div>
+                      ),
+                      key,
+                      label: (
+                        <span className="debug-tool-title flex min-w-0 items-center gap-2">
+                          {isMcpTool(tool) ? (
+                            <MCP
+                              aria-label="MCP tool"
+                              className="shrink-0"
+                              size={14}
+                            />
+                          ) : null}
+                          <span>{getToolName(tool)}</span>
+                        </span>
+                      ),
+                    };
+                  })
+                  .map((item) => (
+                    <Collapse
+                      activeKey={
+                        expandedToolKeys.includes(item.key) ? [item.key] : []
+                      }
+                      className="debug-tool-item w-full min-w-0"
+                      items={[item]}
+                      key={item.key}
+                      onChange={(keys) =>
+                        setToolExpanded(item.key, keys.includes(item.key))
+                      }
+                      padding={12}
+                      variant="outlined"
+                    />
+                  ))}
+              </div>
+              {toolPageCount > 1 ? (
+                <div className="debug-pagination mt-3 flex flex-wrap items-center gap-2">
+                  <Button
+                    disabled={activeToolPage === 0}
+                    onClick={() => setToolPage(activeToolPage - 1)}
+                    size="small"
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-xs text-secondary">
+                    Page {activeToolPage + 1} of {toolPageCount}
+                  </span>
+                  <Button
+                    disabled={activeToolPage === toolPageCount - 1}
+                    onClick={() => setToolPage(activeToolPage + 1)}
+                    size="small"
+                  >
+                    Next
+                  </Button>
+                </div>
+              ) : null}
             </div>
           ) : null}
           <Flexbox className="debug-messages-section" gap={8} padding={12}>
@@ -432,17 +520,33 @@ const StructuredUpstreamRequest = ({
                       <div className="debug-message-role text-sm font-medium text-secondary">
                         {formatRole(item.role)}
                       </div>
-                      <div className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm text-text-light dark:text-text-dark">
-                        {getText(item.content) ??
-                          formatValue(item.content ?? item)}
-                      </div>
+                      <JsonPayload
+                        className="debug-message-code min-w-0 flex-1"
+                        value={item}
+                      />
                     </Flexbox>
                   );
                 })}
-                {messages.length > 1 && !showAllMessages ? (
-                  <Button onClick={() => setShowAllMessages(true)} size="small">
-                    Show all messages
-                  </Button>
+                {messages.length > 1 ? (
+                  <div className="debug-pagination flex flex-wrap items-center gap-2">
+                    {!showAllMessages ? (
+                      <Button
+                        onClick={() => setShowAllMessages(true)}
+                        size="small"
+                      >
+                        Show all messages
+                      </Button>
+                    ) : (
+                      <Button
+                        onClick={() => {
+                          setShowAllMessages(false);
+                        }}
+                        size="small"
+                      >
+                        Show latest message
+                      </Button>
+                    )}
+                  </div>
                 ) : null}
               </Flexbox>
             ) : (
@@ -461,6 +565,7 @@ const StructuredUpstreamRequest = ({
 };
 
 const StructuredUpstreamResponse = ({ value }: { value: unknown }) => {
+  const [showFullContent, setShowFullContent] = useState(false);
   const sseEvents = parseSseEvents(value);
   const parsed = parseJsonValue(value);
   const eventPayloads = sseEvents?.map(parseJsonValue) ?? [];
@@ -474,6 +579,12 @@ const StructuredUpstreamResponse = ({ value }: { value: unknown }) => {
     getText(responseRecord?.choices) ||
     getText(responseRecord?.content);
   const usage = isRecord(responseRecord?.usage) ? responseRecord.usage : null;
+  const visibleContent =
+    content && !showFullContent
+      ? content.slice(0, MAX_VISIBLE_RESPONSE_TEXT_LENGTH)
+      : content;
+  const hasHiddenContent =
+    (content?.length ?? 0) > MAX_VISIBLE_RESPONSE_TEXT_LENGTH;
 
   return (
     <Block
@@ -487,7 +598,7 @@ const StructuredUpstreamResponse = ({ value }: { value: unknown }) => {
           <Tag variant="borderless">SSE · {sseEvents.length} events</Tag>
         ) : null}
       </div>
-      <div className="mt-3 grid gap-3 text-sm">
+      <div className="mt-3 flex flex-col gap-3 text-sm">
         <div className="flex flex-wrap gap-4 text-secondary">
           <DebugMetric
             icon={Bot}
@@ -511,13 +622,29 @@ const StructuredUpstreamResponse = ({ value }: { value: unknown }) => {
           />
         </div>
         {content ? (
-          <Snippet
-            className="max-h-80 w-full overflow-auto"
-            language="text"
-            variant="borderless"
+          <Block
+            className="debug-upstream-response-card w-full min-w-0"
+            direction="vertical"
+            gap={8}
+            padding={12}
+            variant="outlined"
           >
-            {content}
-          </Snippet>
+            <Snippet
+              className="debug-upstream-response-content w-full"
+              language="text"
+              variant="borderless"
+            >
+              {visibleContent ?? ''}
+            </Snippet>
+            {hasHiddenContent ? (
+              <Button
+                onClick={() => setShowFullContent((current) => !current)}
+                size="small"
+              >
+                {showFullContent ? 'Show less' : 'Show all'}
+              </Button>
+            ) : null}
+          </Block>
         ) : (
           <div className="text-xs text-secondary">
             No aggregate response content
@@ -662,7 +789,7 @@ const Debug = () => {
             </Button>
           </div>
         </div>
-        <div className="debug-settings-grid grid gap-4 md:grid-cols-[minmax(0,1fr)_220px_auto] items-end mb-6">
+        <div className="debug-settings-grid mb-6 flex flex-col gap-4 md:flex-row md:items-end">
           <ToggleOption
             checked={debug.enabled}
             description={debugText('enableHelp')}
@@ -699,13 +826,13 @@ const Debug = () => {
           </Button>
         </div>
         {debug.items.length ? (
-          <div className="grid gap-4 w-full min-w-0">
+          <div className="flex w-full min-w-0 flex-col gap-4">
             <Collapse
               activeKey={openTraceIds}
               className="debug-entry w-full min-w-0 max-w-full"
               items={debug.items.map((item) => ({
                 children: (
-                  <div className="grid gap-4 w-full min-w-0 pt-1">
+                  <div className="flex w-full min-w-0 flex-col gap-4 pt-1">
                     {!debug.detailLoadedIds[item.id] ? (
                       <div className="text-sm text-secondary">
                         Loading trace detail...
@@ -733,7 +860,7 @@ const Debug = () => {
                 ),
                 key: item.id,
                 label: (
-                  <div className="grid items-start gap-3 w-full min-w-0 max-w-full text-left">
+                  <div className="flex w-full min-w-0 max-w-full flex-col items-start gap-3 text-left">
                     <div className="font-medium text-text-light dark:text-text-dark break-words text-left">
                       {item.route}
                     </div>

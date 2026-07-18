@@ -1581,7 +1581,11 @@ const AdminPageLayoutContent = ({
   useEffect(() => {
     clearDebugAutoRefreshTimer();
 
-    if (!debug.enabled || debug.autoRefreshSeconds <= 0) {
+    if (
+      activeTab !== 'debug' ||
+      !debug.enabled ||
+      debug.autoRefreshSeconds <= 0
+    ) {
       return;
     }
 
@@ -1593,6 +1597,7 @@ const AdminPageLayoutContent = ({
       clearDebugAutoRefreshTimer();
     };
   }, [
+    activeTab,
     clearDebugAutoRefreshTimer,
     debug.autoRefreshSeconds,
     debug.enabled,

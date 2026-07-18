@@ -281,6 +281,119 @@ textarea {
   flex: 0 0 88px;
 }
 
+#debug .debug-tool-list {
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
+}
+
+#debug .debug-tool-list > .debug-tool-item,
+#debug .debug-tool-item,
+#debug .debug-tool-item .ant-collapse-item {
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
+}
+
+#debug .debug-tool-item {
+  overflow: hidden;
+}
+
+#debug .debug-tool-item .ant-collapse-header,
+#debug .debug-tool-item .ant-collapse-header-text,
+#debug .debug-tool-title,
+#debug .debug-tool-title > span,
+#debug .debug-tool-details,
+#debug .debug-tool-description,
+#debug .debug-message-code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+#debug .debug-json-payload {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+#debug .debug-tool-parameters {
+  height: 20rem;
+  max-height: 32rem;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+#debug .debug-json-payload :is(pre, code) {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap !important;
+  word-break: break-word;
+}
+
+#debug .debug-tool-item .ant-collapse-header-text {
+  flex: 1 1 0;
+  max-width: 100%;
+  min-width: 0;
+  width: 0;
+}
+
+#debug .debug-tool-item .ant-collapse-header {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+#debug .debug-tool-item .debug-tool-title {
+  align-items: center;
+  display: flex !important;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-all;
+}
+
+#debug .debug-tool-item .debug-tool-title > span {
+  display: block;
+  max-width: 100%;
+  min-width: 0;
+}
+
+#debug .debug-tool-item .ant-collapse-content-box {
+  min-width: 0;
+}
+
+#debug .debug-message-code {
+  max-height: 24rem;
+  overflow: auto;
+  padding: 12px;
+}
+
+#debug .debug-upstream-response-content :is(pre, code) {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap !important;
+  word-break: break-word;
+}
+
+#debug .debug-upstream-response-content pre {
+  align-items: flex-start !important;
+  justify-content: flex-start;
+}
+
+#debug .debug-upstream-response-content {
+  --lobe-flex-align: flex-start !important;
+
+  align-items: flex-start !important;
+  height: 32rem;
+  max-height: 32rem !important;
+  min-height: 32rem;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+}
+
+#debug .debug-upstream-response-content > * {
+  align-self: stretch;
+  min-width: 0;
+}
+
 #debug .debug-entry .ant-collapse-header {
   min-width: 0;
   overflow: hidden;
@@ -515,7 +628,7 @@ textarea {
   }
 
   #debug .debug-settings-grid {
-    grid-template-columns: minmax(0, 1fr);
+    flex-direction: column;
   }
 
   #debug .debug-settings-grid > * {
@@ -539,7 +652,9 @@ textarea {
       .debug-messages-section,
       .debug-tool-list,
       .debug-tool-item,
-      .debug-tool-item-content
+      .debug-tool-item-content,
+      .debug-tool-details,
+      .debug-message-code
     ) {
     max-width: 100%;
     min-width: 0;
@@ -621,13 +736,25 @@ textarea {
     align-items: stretch !important;
   }
 
-  #debug .debug-tool-item-content {
-    width: 100%;
-  }
-
   #debug .debug-raw-code {
     max-height: 28rem;
     min-height: 12rem;
+  }
+
+  #debug .debug-message-code {
+    max-height: 20rem;
+  }
+
+  #debug .debug-tool-parameters {
+    height: 16rem;
+    max-height: 24rem;
+    min-height: 0;
+  }
+
+  #debug .debug-upstream-response-content {
+    height: 24rem;
+    max-height: 24rem !important;
+    min-height: 24rem;
   }
 }
 

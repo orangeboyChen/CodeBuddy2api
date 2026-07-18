@@ -787,12 +787,12 @@ describe('server units', () => {
       method: 'POST',
       url: 'https://example.com/v1/responses',
     });
-    enqueueUpstreamResponseSnapshot(
+    await enqueueUpstreamResponseSnapshot(
       trace,
       makeJsonResponse({
         id: 'resp_upstream',
       }),
-    );
+    ).text();
     finalizeDebugTrace(
       trace,
       new Response('completed', {
@@ -803,9 +803,12 @@ describe('server units', () => {
       }),
     );
 
-    await vi.waitFor(async () => {
-      expect(await listDebugLogs()).toHaveLength(1);
-    });
+    await vi.waitFor(
+      async () => {
+        expect(await listDebugLogs()).toHaveLength(1);
+      },
+      { timeout: 2_000 },
+    );
 
     expect((await listDebugLogs())[0]).toMatchObject({
       error: 'upstream warning',
