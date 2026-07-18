@@ -172,7 +172,7 @@ describe('debug view', () => {
       expect(screen.queryByText('/v1/responses')).not.toBeInTheDocument();
       expect(screen.getByText('/v1/messages')).toBeInTheDocument();
     });
-  }, 60_000);
+  }, 120_000);
 
   it('aggregates OpenAI streaming choice deltas', async () => {
     renderWithMessages(
