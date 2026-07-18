@@ -25,8 +25,8 @@ export const GET = async (request: Request): Promise<Response> => {
 
   const url = new URL(request.url);
   const range = url.searchParams.get('range') ?? '24h';
-  const accessKey = url.searchParams.get('accessKey') ?? 'all';
-  const credential = url.searchParams.get('credential') ?? 'all';
+  const accessKey = url.searchParams.getAll('accessKey');
+  const credential = url.searchParams.getAll('credential');
 
   if (!ALLOWED_RANGES.has(range as UsageRange)) {
     return Response.json(

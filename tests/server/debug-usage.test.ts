@@ -83,6 +83,17 @@ describe('debug and usage persistence', () => {
     cleanupTempState();
   });
 
+  it('stores a masked bearer request key without its auth scheme', () => {
+    const trace = createDebugTrace({
+      requestBody: {},
+      requestKey: 'Bearer sk-live-abcdefgh1234',
+      route: '/v1/chat/completions',
+    });
+
+    expect(trace.requestKey).toBe('sk-live-********1234');
+    expect(trace.requestKey).not.toContain('Bearer');
+  });
+
   it('normalizes debug settings and handles invalid persisted files', async () => {
     expect(await getDebugSettings()).toEqual({
       autoRefreshSeconds: 0,
@@ -210,18 +221,18 @@ describe('debug and usage persistence', () => {
     expect(entry.requestKey).not.toBe('request-key-secret');
     expect(entry.requestBody).toMatchObject({
       nested: {
-        api_key: 'shor****',
+        api_key: 'shor********',
       },
       prompt: 'hello',
     });
     expect(entry.upstreamRequest).toMatchObject({
       body: {
-        bearer_token: 'toke****',
+        bearer_token: 'toke*******',
       },
       method: 'POST',
     });
-    expect(entry.upstreamRequest?.headers.Authorization).toContain('...');
-    expect(entry.upstreamRequest?.headers['X-API-Key']).toBe('api-key-...alue');
+    expect(entry.upstreamRequest?.headers.Authorization).toContain('****');
+    expect(entry.upstreamRequest?.headers['X-API-Key']).toBe('api-key-*alue');
     expect(entry.upstreamResponse).toMatchObject({
       body: {
         access_token: expect.not.stringContaining('response-token'),

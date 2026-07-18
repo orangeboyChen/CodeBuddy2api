@@ -140,25 +140,24 @@ const maskSensitiveString = (value: string): string => {
   const bearerPrefixMatch = trimmed.match(/^Bearer\s+/i);
 
   if (bearerPrefixMatch) {
-    const prefix = bearerPrefixMatch[0];
-    const token = trimmed.slice(prefix.length);
+    const token = trimmed.slice(bearerPrefixMatch[0].length);
 
     if (!token) {
-      return prefix.trim();
+      return '';
     }
 
     if (token.length <= 12) {
-      return `${prefix}${token.slice(0, 4)}****`;
+      return `${token.slice(0, 4)}${'*'.repeat(token.length - 4)}`;
     }
 
-    return `${prefix}${token.slice(0, 8)}...${token.slice(-4)}`;
+    return `${token.slice(0, 8)}${'*'.repeat(token.length - 12)}${token.slice(-4)}`;
   }
 
   if (trimmed.length <= 12) {
-    return `${trimmed.slice(0, 4)}****`;
+    return `${trimmed.slice(0, 4)}${'*'.repeat(trimmed.length - 4)}`;
   }
 
-  return `${trimmed.slice(0, 8)}...${trimmed.slice(-4)}`;
+  return `${trimmed.slice(0, 8)}${'*'.repeat(trimmed.length - 12)}${trimmed.slice(-4)}`;
 };
 
 const isSensitiveFieldName = (name: string): boolean => {

@@ -386,6 +386,21 @@ const AdminPageLayoutContent = ({
   const debugAutoRefreshTimerRef = useRef<number | null>(null);
   const usageAutoRefreshTimerRef = useRef<number | null>(null);
   const usageRequestRef = useRef(usage.request);
+  const syncUsageQuery = useCallback(
+    (request: UsageFiltersState, autoRefreshSeconds: number) => {
+      const params = new URLSearchParams(window.location.search);
+      params.delete('accessKey');
+      params.delete('credential');
+      request.accessKey.forEach((value) => params.append('accessKey', value));
+      request.credential.forEach((value) => params.append('credential', value));
+      params.set('range', request.range);
+      params.set('autoRefresh', String(autoRefreshSeconds));
+      router.replace(
+        `${window.location.pathname}?${params.toString()}` as Route,
+      );
+    },
+    [router],
+  );
   const showNotification = useCallback(
     (type: 'success' | 'error' | 'warning' | 'info', message: string) => {
       toast[type]({ description: message, duration: 3000 });
@@ -745,10 +760,14 @@ const AdminPageLayoutContent = ({
       }));
 
       const params = new URLSearchParams({
-        accessKey: nextRequest.accessKey,
-        credential: nextRequest.credential,
         range: nextRequest.range,
       });
+      nextRequest.accessKey.forEach((value) =>
+        params.append('accessKey', value),
+      );
+      nextRequest.credential.forEach((value) =>
+        params.append('credential', value),
+      );
       const result = await requestJson<UsageResponse>(
         `/admin-api/usage?${params.toString()}`,
       );
@@ -766,7 +785,7 @@ const AdminPageLayoutContent = ({
         return;
       }
 
-      const resolvedRequest = {
+      const resolvedRequest: UsageFiltersState = {
         accessKey: nextRequest.accessKey,
         credential: nextRequest.credential,
         range: result.data?.range ?? nextRequest.range,
@@ -1461,6 +1480,41 @@ const AdminPageLayoutContent = ({
     );
   };
 
+  const saveDebugEnabled = async (enabled: boolean) => {
+    setDebug((current) => ({
+      ...current,
+      enabled,
+      saving: true,
+    }));
+
+    const result = await requestJson<DebugResponse>('/admin-api/debug', {
+      body: JSON.stringify({ enabled }),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      method: 'POST',
+    });
+
+    if (!result.ok) {
+      setDebug((current) => ({
+        ...current,
+        enabled: debug.enabled,
+        saving: false,
+      }));
+      showNotification(
+        'error',
+        getErrorMessage(result.data, consoleMessages.debugSaveFailed),
+      );
+      return;
+    }
+
+    setDebug((current) => ({
+      ...current,
+      enabled: Boolean(result.data?.enabled),
+      saving: false,
+    }));
+  };
+
   const clearDebugItems = async () => {
     setDebug((current) => ({
       ...current,
@@ -1882,9 +1936,14 @@ const AdminPageLayoutContent = ({
             <UsageProvider
               value={{
                 onAccessKeyChange: (value) => {
+                  syncUsageQuery(
+                    { ...usageRequestRef.current, accessKey: value },
+                    usage.autoRefreshSeconds,
+                  );
                   void loadUsage({ accessKey: value });
                 },
                 onAutoRefreshSecondsChange: (value) => {
+                  syncUsageQuery(usageRequestRef.current, value);
                   setUsage((current) => ({
                     ...current,
                     autoRefreshSeconds: value,
@@ -1895,12 +1954,20 @@ const AdminPageLayoutContent = ({
                   void clearUsageHistory();
                 },
                 onCredentialChange: (value) => {
+                  syncUsageQuery(
+                    { ...usageRequestRef.current, credential: value },
+                    usage.autoRefreshSeconds,
+                  );
                   void loadUsage({ credential: value });
                 },
                 onHoverPoint: (point) => {
                   setUsage((current) => ({ ...current, hoveredPoint: point }));
                 },
                 onRangeChange: (value) => {
+                  syncUsageQuery(
+                    { ...usageRequestRef.current, range: value },
+                    usage.autoRefreshSeconds,
+                  );
                   void loadUsage({ range: value });
                 },
                 onRefresh: () => {
@@ -1964,7 +2031,7 @@ const AdminPageLayoutContent = ({
                   void copyText(value, consoleMessages.copyContent);
                 },
                 onEnabledChange: (value) => {
-                  setDebug((current) => ({ ...current, enabled: value }));
+                  void saveDebugEnabled(value);
                 },
                 onLoadDetail: (id) => {
                   void loadDebugDetail(id);

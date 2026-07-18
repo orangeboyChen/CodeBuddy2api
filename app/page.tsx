@@ -10,6 +10,7 @@ import type {
   CredentialSummary,
 } from '@/app/credentials/credentials';
 import type { TabKey } from '@/app/page-data';
+import type { UsageFiltersState } from '@/app/usage/usage';
 import { listAccessKeys } from '@/lib/server/domain/access-keys';
 import {
   getAdminSessionSummary,
@@ -20,6 +21,7 @@ import {
   getCurrentCredentialInfo,
   listCredentials,
 } from '@/lib/server/domain/credentials';
+import { getDebugSettings, listDebugLogs } from '@/lib/server/domain/debug';
 import { getUsageStats } from '@/lib/server/domain/stats';
 import { getUsageAnalytics } from '@/lib/server/domain/usage';
 import {
@@ -55,6 +57,12 @@ const formatInitialHealthLabel = (locale: AppLocale, timestamp: string) => {
 
 const getInitialData = async (
   locale: AppLocale,
+  usageRequest: UsageFiltersState = {
+    accessKey: [],
+    credential: [],
+    range: '24h',
+  },
+  usageAutoRefreshSeconds = 15,
 ): Promise<AdminConsoleInitialData> => {
   const timestamp = new Date().toISOString();
   const [
@@ -63,6 +71,8 @@ const getInitialData = async (
     credentials,
     currentCredential,
     activeConfig,
+    debugSettings,
+    debugLogs,
     stats,
     usage,
   ] = await Promise.all([
@@ -71,8 +81,10 @@ const getInitialData = async (
     listCredentials(),
     getCurrentCredentialInfo(),
     getActiveConfig(),
+    getDebugSettings(),
+    listDebugLogs(),
     getUsageStats(),
-    getUsageAnalytics({ range: '24h' }),
+    getUsageAnalytics(usageRequest),
   ]);
 
   return {
@@ -82,9 +94,30 @@ const getInitialData = async (
     currentCredential:
       currentCredential as unknown as AdminConsoleInitialData['currentCredential'],
     debug: {
-      autoRefreshSeconds: 0,
-      enabled: false,
-      maxEntries: 10,
+      autoRefreshSeconds: debugSettings.autoRefreshSeconds,
+      enabled: debugSettings.enabled,
+      items: debugLogs.map((log) => ({
+        credentialFilename: log.credentialFilename,
+        createdAt: log.createdAt,
+        elapsedMs: log.elapsedMs,
+        error: log.error,
+        id: log.id,
+        model: log.model,
+        requestBody: null,
+        requestKey: log.requestKey,
+        route: log.route,
+        transformedResponse: log.transformedResponse
+          ? { body: null, headers: {}, status: log.transformedResponse.status }
+          : null,
+        upstreamRequest: log.upstreamRequest
+          ? { method: log.upstreamRequest.method, url: log.upstreamRequest.url }
+          : null,
+        upstreamResponse: log.upstreamResponse
+          ? { body: null, headers: {}, status: log.upstreamResponse.status }
+          : null,
+        usage: log.usage,
+      })),
+      maxEntries: debugSettings.maxEntries,
     },
     health: {
       checkedAtLabel: formatInitialHealthLabel(locale, timestamp),
@@ -99,6 +132,8 @@ const getInitialData = async (
     stats,
     usage: {
       ...usage,
+      autoRefreshSeconds: usageAutoRefreshSeconds,
+      request: usageRequest,
       updatedAtLabel: new Date(timestamp).toLocaleTimeString(locale),
     },
   };
@@ -107,9 +142,13 @@ const getInitialData = async (
 export const AdminPage = async ({
   children,
   initialTab,
+  initialUsageAutoRefreshSeconds,
+  initialUsageRequest,
 }: {
   children: ReactNode;
   initialTab: TabKey;
+  initialUsageAutoRefreshSeconds?: number;
+  initialUsageRequest?: UsageFiltersState;
 }) => {
   const cookieStore = await cookies();
   const headerStore = await headers();
@@ -141,7 +180,11 @@ export const AdminPage = async ({
 
   return (
     <AdminPageLayout
-      initialData={await getInitialData(locale)}
+      initialData={await getInitialData(
+        locale,
+        initialUsageRequest,
+        initialUsageAutoRefreshSeconds,
+      )}
       initialLocalePreference={localePreference}
       showLogout={sessionAuthenticated}
       initialTab={initialTab}

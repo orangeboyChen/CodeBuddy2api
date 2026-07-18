@@ -86,6 +86,125 @@ describe('dashboard view', () => {
 });
 
 describe('debug view', () => {
+  it('filters traces by interface type, credential, and masked API key', async () => {
+    const items = [
+      {
+        credentialFilename: 'openai.json',
+        createdAt: '2026-07-19T00:00:00.000Z',
+        elapsedMs: null,
+        error: null,
+        id: 'chat',
+        requestBody: {},
+        requestKey: 'sk-chat****1234',
+        route: '/v1/chat/completions',
+        transformedResponse: null,
+        upstreamRequest: null,
+        upstreamResponse: null,
+      },
+      {
+        credentialFilename: 'responses.json',
+        createdAt: '2026-07-19T00:00:00.000Z',
+        elapsedMs: null,
+        error: null,
+        id: 'responses',
+        requestBody: {},
+        requestKey: 'sk-response****5678',
+        route: '/v1/responses',
+        transformedResponse: null,
+        upstreamRequest: null,
+        upstreamResponse: null,
+      },
+      {
+        credentialFilename: 'anthropic.json',
+        createdAt: '2026-07-19T00:00:00.000Z',
+        elapsedMs: null,
+        error: null,
+        id: 'messages',
+        requestBody: {},
+        requestKey: 'sk-message****9012',
+        route: '/v1/messages',
+        transformedResponse: null,
+        upstreamRequest: null,
+        upstreamResponse: null,
+      },
+    ];
+    const controller = {
+      autoRefreshOptions: [],
+      debug: {
+        autoRefreshSeconds: 0,
+        detailLoadedIds: {},
+        detailLoadingIds: {},
+        enabled: true,
+        items,
+        loading: false,
+        maxEntries: 100,
+        saving: false,
+      },
+      onAutoRefreshSecondsChange: vi.fn(),
+      onClear: vi.fn(),
+      onCopy: vi.fn(),
+      onEnabledChange: vi.fn(),
+      onMaxEntriesChange: vi.fn(),
+      onRefresh: vi.fn(),
+      onSave: vi.fn(),
+    };
+    const renderDebug = () =>
+      renderWithMessages(
+        <DebugProvider value={controller}>
+          <Debug />
+        </DebugProvider>,
+      );
+    const selectFilterOption = async (id: string, label: string) => {
+      const filter = document.getElementById(id)!;
+      fireEvent.click(filter);
+      const option = await screen.findByRole('option', { name: label });
+      fireEvent.pointerDown(option, {
+        button: 0,
+        pointerId: 1,
+        pointerType: 'mouse',
+      });
+      fireEvent.pointerUp(option, {
+        button: 0,
+        pointerId: 1,
+        pointerType: 'mouse',
+      });
+      fireEvent.click(option);
+    };
+
+    let debugView = renderDebug();
+    await selectFilterOption('debugFilterFormat', 'OpenAI Chat');
+
+    await waitFor(() => {
+      expect(screen.getByText('/v1/chat/completions')).toBeInTheDocument();
+      expect(screen.queryByText('/v1/responses')).not.toBeInTheDocument();
+      expect(screen.queryByText('/v1/messages')).not.toBeInTheDocument();
+    });
+
+    debugView.unmount();
+    debugView = renderDebug();
+    await selectFilterOption('debugFilterCredential', 'responses.json');
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText('/v1/chat/completions'),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText('/v1/responses')).toBeInTheDocument();
+      expect(screen.queryByText('/v1/messages')).not.toBeInTheDocument();
+    });
+
+    debugView.unmount();
+    renderDebug();
+    await selectFilterOption('debugFilterApiKey', 'sk-message****9012');
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText('/v1/chat/completions'),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText('/v1/responses')).not.toBeInTheDocument();
+      expect(screen.getByText('/v1/messages')).toBeInTheDocument();
+    });
+  });
+
   it('aggregates OpenAI streaming choice deltas', async () => {
     renderWithMessages(
       <DebugProvider
@@ -114,6 +233,16 @@ describe('debug view', () => {
                       { content: '2 + 2 equals 4.', role: 'assistant' },
                     ],
                     model: 'hy3',
+                    tools: [
+                      {
+                        function: {
+                          description: 'Create a pull request',
+                          name: 'mcp__github__create_pr',
+                          parameters: { type: 'object' },
+                        },
+                        type: 'function',
+                      },
+                    ],
                   },
                   method: 'POST',
                   url: 'https://upstream.test',
@@ -151,6 +280,10 @@ describe('debug view', () => {
     expect(screen.queryByText('nullms')).not.toBeInTheDocument();
     expect(screen.getByText('Assistant')).toBeInTheDocument();
     expect(screen.queryByText('User')).not.toBeInTheDocument();
+    expect(screen.getByText('github')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /github/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create PR' }));
+    expect(screen.getByText('mcp__github__create_pr')).toBeInTheDocument();
   });
 
   it('aggregates Responses API streaming deltas', async () => {

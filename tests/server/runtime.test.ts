@@ -195,7 +195,7 @@ describe('server runtime', () => {
       )
     ).json();
     expect(listedAccessKeys.access_keys).toHaveLength(1);
-    expect(listedAccessKeys.access_keys[0].maskedSecret).toContain('...');
+    expect(listedAccessKeys.access_keys[0].maskedSecret).toContain('****');
 
     const revealedSecretPayload = await (
       await AdminAccessKeySecretRoute.GET(new Request('http://localhost'), {

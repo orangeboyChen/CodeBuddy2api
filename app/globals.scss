@@ -272,6 +272,22 @@ textarea {
   padding: 12px !important;
 }
 
+#debug .debug-payload-step {
+  align-items: center;
+  background: var(--lobe-color-text);
+  border-radius: 50%;
+  color: var(--lobe-color-bg-container);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  font-weight: 700;
+  height: 20px;
+  justify-content: center;
+  line-height: 1;
+  user-select: none;
+  width: 20px;
+}
+
 #debug .debug-message-row {
   align-items: flex-start;
   border-block-start: 1px solid var(--lobe-color-fill-tertiary);
@@ -279,6 +295,18 @@ textarea {
 
 #debug .debug-message-role {
   flex: 0 0 88px;
+}
+
+#debug .debug-data-section-title {
+  align-items: baseline;
+}
+
+#debug .debug-data-section-title > svg {
+  flex: 0 0 auto;
+}
+
+#credentials .access-key-credential-tags {
+  row-gap: 12px;
 }
 
 #debug .debug-tool-list {
@@ -382,9 +410,9 @@ textarea {
   --lobe-flex-align: flex-start !important;
 
   align-items: flex-start !important;
-  height: 32rem;
-  max-height: 32rem !important;
-  min-height: 32rem;
+  height: 20rem;
+  max-height: 20rem !important;
+  min-height: 20rem;
   overflow-x: hidden !important;
   overflow-y: auto !important;
 }
@@ -752,9 +780,9 @@ textarea {
   }
 
   #debug .debug-upstream-response-content {
-    height: 24rem;
-    max-height: 24rem !important;
-    min-height: 24rem;
+    height: 16rem;
+    max-height: 16rem !important;
+    min-height: 16rem;
   }
 }
 

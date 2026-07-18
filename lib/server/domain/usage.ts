@@ -467,14 +467,25 @@ const getTodayBounds = (now: Date) => {
 
 const matchesFilter = (
   event: UsageEventRecord,
-  accessKey: string,
-  credential: string,
+  accessKey: string | string[],
+  credential: string | string[],
 ): boolean => {
-  if (accessKey !== 'all' && event.accessKeyId !== accessKey) {
+  const accessKeys = Array.isArray(accessKey) ? accessKey : [accessKey];
+  const credentials = Array.isArray(credential) ? credential : [credential];
+
+  if (
+    accessKeys.length > 0 &&
+    !accessKeys.includes('all') &&
+    !accessKeys.includes(event.accessKeyId ?? '')
+  ) {
     return false;
   }
 
-  if (credential !== 'all' && event.credentialFilename !== credential) {
+  if (
+    credentials.length > 0 &&
+    !credentials.includes('all') &&
+    !credentials.includes(event.credentialFilename ?? '')
+  ) {
     return false;
   }
 
@@ -580,8 +591,8 @@ export const getUsageAnalytics = async ({
   now = new Date(),
   range,
 }: {
-  accessKey?: string;
-  credential?: string;
+  accessKey?: string | string[];
+  credential?: string | string[];
   now?: Date;
   range: UsageRange;
 }): Promise<UsageAnalyticsResponse> => {

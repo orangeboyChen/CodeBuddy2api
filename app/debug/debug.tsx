@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import { atom } from 'jotai';
 import { useTranslations } from 'next-intl';
-import { createContext, useContext, useState } from 'react';
+import { createContext, useContext, useMemo, useState } from 'react';
 
 export interface DebugLogEntry {
   credentialFilename: string | null;
@@ -137,6 +137,7 @@ const useDebug = (): DebugController => {
 type JsonRecord = Record<string, unknown>;
 
 const MAX_VISIBLE_RESPONSE_TEXT_LENGTH = 12_000;
+const DEBUG_TRACE_PAGE_SIZE = 10;
 
 const isRecord = (value: unknown): value is JsonRecord => {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -223,7 +224,15 @@ const getText = (value: unknown): string | null => {
       .join('');
   }
   if (!isRecord(value)) return null;
-  for (const key of ['text', 'content', 'value', 'delta']) {
+  for (const key of [
+    'text',
+    'content',
+    'value',
+    'delta',
+    'message',
+    'output',
+    'output_text',
+  ]) {
     const text = getText(value[key]);
     if (text) return text;
   }
@@ -246,18 +255,86 @@ const getToolName = (tool: JsonRecord): string => {
   return String(functionValue.name ?? tool.name ?? 'Unnamed tool');
 };
 
+const getMcpToolInfo = (
+  tool: JsonRecord,
+): { serverName: string; toolName: string } | null => {
+  const match = getToolName(tool).match(/^mcp__(.+?)__(.+)$/);
+
+  return match ? { serverName: match[1], toolName: match[2] } : null;
+};
+
+const formatToolName = (value: string): string => {
+  const abbreviations = new Set([
+    'api',
+    'cli',
+    'css',
+    'html',
+    'http',
+    'https',
+    'id',
+    'json',
+    'mcp',
+    'pr',
+    'sql',
+    'ssh',
+    'url',
+  ]);
+
+  return value
+    .replaceAll(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => {
+      const normalized = part.toLowerCase();
+      return abbreviations.has(normalized)
+        ? normalized.toUpperCase()
+        : `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`;
+    })
+    .join(' ');
+};
+
+const getResponseFormat = (route: string): string => {
+  if (route === '/v1/responses') return 'OpenAI Responses';
+  if (route === '/v1/messages') return 'Anthropic Messages';
+  return 'OpenAI Chat';
+};
+
+const formatMaskedRequestKey = (value: string): string => {
+  return value.replace(/^Bearer\s+/i, '').replaceAll('...', '****');
+};
+
+const EMPTY_FILTER_VALUE = '__debug-filter-empty__';
+
+const getFilterValues = (value: unknown): string[] => {
+  if (Array.isArray(value)) return value.map(String);
+  return value === null || value === undefined || value === ''
+    ? []
+    : [String(value)];
+};
+
+const PayloadHeader = ({
+  format,
+  step,
+  title,
+}: {
+  format?: string;
+  step: number;
+  title: string;
+}) => {
+  return (
+    <div className="flex flex-wrap items-center gap-2 font-medium text-text-light dark:text-text-dark">
+      <span className="debug-payload-step" aria-hidden="true">
+        {step}
+      </span>
+      <span>{title}</span>
+      {format ? <Tag variant="borderless">{format}</Tag> : null}
+    </div>
+  );
+};
+
 const formatRole = (value: unknown): string => {
   const role = String(value ?? 'input');
   return `${role.slice(0, 1).toUpperCase()}${role.slice(1)}`;
-};
-
-const isMcpTool = (tool: JsonRecord): boolean => {
-  const serialized = JSON.stringify(tool).toLowerCase();
-  return (
-    tool.type === 'mcp' ||
-    serialized.includes('mcp_') ||
-    serialized.includes('mcp')
-  );
 };
 
 const RawPayload = ({ value }: { value: unknown }) => {
@@ -345,15 +422,22 @@ const DebugMetric = ({
 };
 
 const StructuredUpstreamRequest = ({
+  format,
+  step,
   title,
   value,
 }: {
+  format: string;
+  step: number;
   title: string;
   value: unknown;
 }) => {
   const pageSize = 10;
   const [expandedToolKeys, setExpandedToolKeys] = useState<string[]>([]);
   const [showAllMessages, setShowAllMessages] = useState(false);
+  const [expandedMcpGroups, setExpandedMcpGroups] = useState<
+    Record<string, boolean>
+  >({});
   const [toolPage, setToolPage] = useState(0);
   const request = parseJsonValue(value);
   const record = isRecord(request) ? request : null;
@@ -364,28 +448,84 @@ const StructuredUpstreamRequest = ({
     ? record.messages
     : Array.isArray(record?.input)
       ? record.input
-      : [];
-  const toolPageCount = Math.ceil(tools.length / pageSize);
+      : typeof record?.input === 'string'
+        ? [record.input]
+        : [];
+  const mcpGroups = new Map<string, JsonRecord[]>();
+  const standardTools = tools.filter((tool) => {
+    const mcp = getMcpToolInfo(tool);
+    if (!mcp) return true;
+    const group = mcpGroups.get(mcp.serverName) ?? [];
+    group.push(tool);
+    mcpGroups.set(mcp.serverName, group);
+    return false;
+  });
+  const toolEntries = [
+    ...[...mcpGroups.entries()].map(([serverName, groupTools]) => ({
+      groupTools,
+      kind: 'mcp' as const,
+      serverName,
+    })),
+    ...standardTools.map((tool) => ({ kind: 'tool' as const, tool })),
+  ];
+  const toolPageCount = Math.ceil(toolEntries.length / pageSize);
   const activeToolPage = Math.min(toolPage, Math.max(toolPageCount - 1, 0));
-  const displayedTools = tools.slice(
+  const displayedToolEntries = toolEntries.slice(
     activeToolPage * pageSize,
     (activeToolPage + 1) * pageSize,
   );
   const displayedMessages = showAllMessages ? messages : messages.slice(-1);
-  const toolKeys = tools.map((tool, index) => `${getToolName(tool)}-${index}`);
-  const areAllToolsExpanded =
-    toolKeys.length > 0 &&
-    toolKeys.every((key) => expandedToolKeys.includes(key));
-
-  const toggleAllTools = () => {
-    setExpandedToolKeys(areAllToolsExpanded ? [] : toolKeys);
-  };
-
   const setToolExpanded = (key: string, open: boolean) => {
     setExpandedToolKeys((current) =>
       open
         ? [...new Set([...current, key])]
         : current.filter((item) => item !== key),
+    );
+  };
+
+  const renderToolCard = (tool: JsonRecord, key: string) => {
+    const functionValue = isRecord(tool.function) ? tool.function : tool;
+    const fullName = getToolName(tool);
+    const mcp = getMcpToolInfo(tool);
+    const displayName = mcp ? formatToolName(mcp.toolName) : fullName;
+
+    return (
+      <Collapse
+        activeKey={expandedToolKeys.includes(key) ? [key] : []}
+        className="debug-tool-item w-full min-w-0"
+        items={[
+          {
+            children: (
+              <div className="debug-tool-details flex flex-col gap-3">
+                {mcp ? (
+                  <div className="text-xs text-secondary break-all">
+                    {fullName}
+                  </div>
+                ) : null}
+                <div className="debug-tool-description text-sm text-secondary">
+                  {String(tool.type ?? 'function')} -{' '}
+                  {String(functionValue.description ?? 'No description')}
+                </div>
+                <div className="flex flex-col gap-1">
+                  <div className="text-xs font-medium text-secondary">
+                    Parameters
+                  </div>
+                  <JsonPayload
+                    className="debug-tool-parameters"
+                    value={functionValue.parameters ?? tool.parameters ?? {}}
+                  />
+                </div>
+              </div>
+            ),
+            key,
+            label: <span className="debug-tool-title">{displayName}</span>,
+          },
+        ]}
+        key={key}
+        onChange={(keys) => setToolExpanded(key, keys.includes(key))}
+        padding={12}
+        variant="outlined"
+      />
     );
   };
 
@@ -395,85 +535,66 @@ const StructuredUpstreamRequest = ({
       padding={12}
       variant="outlined"
     >
-      <div className="flex items-center gap-2 font-medium text-text-light dark:text-text-dark">
-        {title}
-      </div>
+      <PayloadHeader format={format} step={step} title={title} />
       {record ? (
         <div className="mt-3 flex flex-col gap-4 text-sm">
           {tools.length ? (
             <div className="w-full">
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2 font-medium">
-                <div className="flex items-center gap-2">
+              <div className="mb-2 flex items-center gap-2 font-medium">
+                <div className="debug-data-section-title flex items-center gap-2">
                   <Wrench aria-hidden="true" size={16} /> Tools ({tools.length})
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button onClick={toggleAllTools} size="small">
-                    {areAllToolsExpanded ? 'Collapse all' : 'Expand all'}
-                  </Button>
-                </div>
               </div>
-              <div className="debug-tool-list flex flex-col gap-2">
-                {displayedTools
-                  .map((tool, index) => {
-                    const actualIndex = activeToolPage * pageSize + index;
-                    const functionValue = isRecord(tool.function)
-                      ? tool.function
-                      : tool;
-                    const key = `${getToolName(tool)}-${actualIndex}`;
-                    return {
-                      children: (
-                        <div className="debug-tool-details flex flex-col gap-3">
-                          <div className="debug-tool-description text-sm text-secondary">
-                            {String(tool.type ?? 'function')} -{' '}
-                            {String(
-                              functionValue.description ?? 'No description',
-                            )}
-                          </div>
-                          <div className="flex flex-col gap-1">
-                            <div className="text-xs font-medium text-secondary">
-                              Parameters
-                            </div>
-                            <JsonPayload
-                              className="debug-tool-parameters"
-                              value={
-                                functionValue.parameters ??
-                                tool.parameters ??
-                                {}
-                              }
-                            />
-                          </div>
-                        </div>
-                      ),
-                      key,
-                      label: (
-                        <span className="debug-tool-title flex min-w-0 items-center gap-2">
-                          {isMcpTool(tool) ? (
-                            <MCP
-                              aria-label="MCP tool"
-                              className="shrink-0"
-                              size={14}
-                            />
-                          ) : null}
-                          <span>{getToolName(tool)}</span>
-                        </span>
-                      ),
-                    };
-                  })
-                  .map((item) => (
+              <div className="flex flex-col gap-4">
+                {displayedToolEntries.map((entry, index) => {
+                  if (entry.kind === 'tool') {
+                    return renderToolCard(
+                      entry.tool,
+                      `tool-${getToolName(entry.tool)}-${index}`,
+                    );
+                  }
+
+                  const expanded = Boolean(expandedMcpGroups[entry.serverName]);
+                  return (
                     <Collapse
-                      activeKey={
-                        expandedToolKeys.includes(item.key) ? [item.key] : []
-                      }
+                      activeKey={expanded ? [`mcp-${entry.serverName}`] : []}
                       className="debug-tool-item w-full min-w-0"
-                      items={[item]}
-                      key={item.key}
+                      items={[
+                        {
+                          children: (
+                            <div className="debug-tool-list flex flex-col gap-2">
+                              {entry.groupTools.map((tool, toolIndex) =>
+                                renderToolCard(
+                                  tool,
+                                  `mcp-${entry.serverName}-${getToolName(tool)}-${toolIndex}`,
+                                ),
+                              )}
+                            </div>
+                          ),
+                          key: `mcp-${entry.serverName}`,
+                          label: (
+                            <span className="debug-tool-title flex items-center gap-2">
+                              <MCP aria-label="MCP" size={18} />
+                              <span className="break-words">
+                                {entry.serverName}
+                              </span>
+                            </span>
+                          ),
+                        },
+                      ]}
+                      key={`mcp-${entry.serverName}`}
                       onChange={(keys) =>
-                        setToolExpanded(item.key, keys.includes(item.key))
+                        setExpandedMcpGroups((current) => ({
+                          ...current,
+                          [entry.serverName]: keys.includes(
+                            `mcp-${entry.serverName}`,
+                          ),
+                        }))
                       }
-                      padding={12}
                       variant="outlined"
                     />
-                  ))}
+                  );
+                })}
               </div>
               {toolPageCount > 1 ? (
                 <div className="debug-pagination mt-3 flex flex-wrap items-center gap-2">
@@ -499,7 +620,7 @@ const StructuredUpstreamRequest = ({
             </div>
           ) : null}
           <Flexbox className="debug-messages-section" gap={8} padding={12}>
-            <div className="flex items-center gap-2 font-medium">
+            <div className="debug-data-section-title flex items-center gap-2 font-medium">
               <MessageSquareText aria-hidden="true" size={16} /> Messages (
               {messages.length})
             </div>
@@ -564,7 +685,17 @@ const StructuredUpstreamRequest = ({
   );
 };
 
-const StructuredUpstreamResponse = ({ value }: { value: unknown }) => {
+const StructuredResponse = ({
+  format,
+  step,
+  title,
+  value,
+}: {
+  format: string;
+  step: number;
+  title: string;
+  value: unknown;
+}) => {
   const [showFullContent, setShowFullContent] = useState(false);
   const sseEvents = parseSseEvents(value);
   const parsed = parseJsonValue(value);
@@ -592,8 +723,8 @@ const StructuredUpstreamResponse = ({ value }: { value: unknown }) => {
       padding={12}
       variant="outlined"
     >
-      <div className="flex items-center gap-2 font-medium text-text-light dark:text-text-dark">
-        Upstream response
+      <div className="flex items-center gap-2">
+        <PayloadHeader format={format} step={step} title={title} />
         {sseEvents ? (
           <Tag variant="borderless">SSE · {sseEvents.length} events</Tag>
         ) : null}
@@ -657,9 +788,13 @@ const StructuredUpstreamResponse = ({ value }: { value: unknown }) => {
 };
 
 const RawDebugSection = ({
+  format,
+  step,
   title,
   value,
 }: {
+  format?: string;
+  step: number;
   title: string;
   value: unknown;
 }) => {
@@ -669,9 +804,7 @@ const RawDebugSection = ({
       padding={12}
       variant="outlined"
     >
-      <div className="font-medium text-text-light dark:text-text-dark">
-        {title}
-      </div>
+      <PayloadHeader format={format} step={step} title={title} />
       <RawPayload value={value} />
     </Block>
   );
@@ -742,6 +875,93 @@ const Debug = () => {
   } = useDebug();
   const debugText = useTranslations('Admin.debug');
   const [openTraceIds, setOpenTraceIds] = useState<string[]>([]);
+  const [selectedFormats, setSelectedFormats] = useState<string[]>([]);
+  const [selectedCredentials, setSelectedCredentials] = useState<string[]>([]);
+  const [selectedModels, setSelectedModels] = useState<string[]>([]);
+  const [selectedRequestKeys, setSelectedRequestKeys] = useState<string[]>([]);
+  const [tracePage, setTracePage] = useState(0);
+  const formatOptions = useMemo(
+    () =>
+      [
+        ...new Set(debug.items.map((item) => getResponseFormat(item.route))),
+      ].map((format) => ({ label: format, value: format })),
+    [debug.items],
+  );
+  const credentialOptions = useMemo(
+    () =>
+      [
+        ...new Set(
+          debug.items.map(
+            (item) => item.credentialFilename ?? EMPTY_FILTER_VALUE,
+          ),
+        ),
+      ].map((credential) => ({
+        label:
+          credential === EMPTY_FILTER_VALUE
+            ? debugText('credentialUnknown')
+            : credential,
+        value: credential,
+      })),
+    [debug.items, debugText],
+  );
+  const requestKeyOptions = useMemo(
+    () =>
+      [
+        ...new Set(
+          debug.items.map((item) => item.requestKey ?? EMPTY_FILTER_VALUE),
+        ),
+      ].map((requestKey) => ({
+        label:
+          requestKey === EMPTY_FILTER_VALUE
+            ? debugText('requestKeyNone')
+            : formatMaskedRequestKey(requestKey),
+        value: requestKey,
+      })),
+    [debug.items, debugText],
+  );
+  const modelOptions = useMemo(
+    () =>
+      [
+        ...new Set(debug.items.map((item) => item.model ?? EMPTY_FILTER_VALUE)),
+      ].map((model) => ({
+        label: model === EMPTY_FILTER_VALUE ? debugText('modelUnknown') : model,
+        value: model,
+      })),
+    [debug.items, debugText],
+  );
+  const filteredItems = useMemo(
+    () =>
+      debug.items.filter((item) => {
+        const format = getResponseFormat(item.route);
+        const credential = item.credentialFilename ?? EMPTY_FILTER_VALUE;
+        const model = item.model ?? EMPTY_FILTER_VALUE;
+        const requestKey = item.requestKey ?? EMPTY_FILTER_VALUE;
+
+        return (
+          (!selectedFormats.length || selectedFormats.includes(format)) &&
+          (!selectedCredentials.length ||
+            selectedCredentials.includes(credential)) &&
+          (!selectedModels.length || selectedModels.includes(model)) &&
+          (!selectedRequestKeys.length ||
+            selectedRequestKeys.includes(requestKey))
+        );
+      }),
+    [
+      debug.items,
+      selectedCredentials,
+      selectedFormats,
+      selectedModels,
+      selectedRequestKeys,
+    ],
+  );
+  const tracePageCount = Math.ceil(
+    filteredItems.length / DEBUG_TRACE_PAGE_SIZE,
+  );
+  const activeTracePage = Math.min(tracePage, Math.max(tracePageCount - 1, 0));
+  const displayedTraceItems = filteredItems.slice(
+    activeTracePage * DEBUG_TRACE_PAGE_SIZE,
+    (activeTracePage + 1) * DEBUG_TRACE_PAGE_SIZE,
+  );
   const formatCreatedAt = (createdAt: string) => {
     const date = new Date(createdAt);
 
@@ -789,187 +1009,319 @@ const Debug = () => {
             </Button>
           </div>
         </div>
-        <div className="debug-settings-grid mb-6 flex flex-col gap-4 md:flex-row md:items-end">
-          <ToggleOption
-            checked={debug.enabled}
-            description={debugText('enableHelp')}
-            onChange={onEnabledChange}
-            title={debugText('enable')}
-          />
-          <div>
-            <label
-              className="block mb-2 font-medium text-text-light dark:text-text-dark"
-              htmlFor="debugMaxEntries"
-            >
-              {debugText('maxEntries')}
-            </label>
-            <Input
-              id="debugMaxEntries"
-              min={1}
-              onChange={(event) =>
-                onMaxEntriesChange(
-                  Number.parseInt(event.target.value || '0', 10) || 1,
-                )
-              }
-              type="number"
-              value={debug.maxEntries}
+        <div className="debug-settings-grid mb-6 flex flex-col gap-4">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end">
+            <ToggleOption
+              checked={debug.enabled}
+              description={debugText('enableHelp')}
+              onChange={onEnabledChange}
+              title={debugText('enable')}
             />
           </div>
-          <Button
-            disabled={debug.saving}
-            icon={Save}
-            loading={debug.saving}
-            onClick={onSave}
-            type="primary"
-          >
-            {debugText('save')}
-          </Button>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+            <div className="min-w-0 max-w-sm">
+              <label
+                className="block mb-2 font-medium text-text-light dark:text-text-dark"
+                htmlFor="debugMaxEntries"
+              >
+                {debugText('maxEntries')}
+              </label>
+              <Input
+                id="debugMaxEntries"
+                min={1}
+                onChange={(event) =>
+                  onMaxEntriesChange(
+                    Number.parseInt(event.target.value || '0', 10) || 1,
+                  )
+                }
+                type="number"
+                value={debug.maxEntries}
+              />
+            </div>
+            <Button
+              disabled={debug.saving}
+              icon={Save}
+              loading={debug.saving}
+              onClick={onSave}
+              type="primary"
+            >
+              {debugText('save')}
+            </Button>
+          </div>
         </div>
         {debug.items.length ? (
           <div className="flex w-full min-w-0 flex-col gap-4">
-            <Collapse
-              activeKey={openTraceIds}
-              className="debug-entry w-full min-w-0 max-w-full"
-              items={debug.items.map((item) => ({
-                children: (
-                  <div className="flex w-full min-w-0 flex-col gap-4 pt-1">
-                    {!debug.detailLoadedIds[item.id] ? (
-                      <div className="text-sm text-secondary">
-                        Loading trace detail...
+            <div className="debug-filter-row flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap">
+              <div className="min-w-0 flex-1 sm:basis-48">
+                <label
+                  className="mb-2 block text-sm font-medium"
+                  htmlFor="debugFilterFormat"
+                >
+                  {debugText('filterInterfaceType')}
+                </label>
+                <Select
+                  allowClear
+                  id="debugFilterFormat"
+                  mode="multiple"
+                  onChange={(value) => {
+                    setSelectedFormats(getFilterValues(value));
+                    setTracePage(0);
+                  }}
+                  options={formatOptions}
+                  placeholder={debugText('filterInterfaceTypePlaceholder')}
+                  showSearch
+                  value={selectedFormats}
+                />
+              </div>
+              <div className="min-w-0 flex-1 sm:basis-48">
+                <label
+                  className="mb-2 block text-sm font-medium"
+                  htmlFor="debugFilterModel"
+                >
+                  {debugText('filterModel')}
+                </label>
+                <Select
+                  allowClear
+                  id="debugFilterModel"
+                  mode="multiple"
+                  onChange={(value) => {
+                    setSelectedModels(getFilterValues(value));
+                    setTracePage(0);
+                  }}
+                  options={modelOptions}
+                  placeholder={debugText('filterModelPlaceholder')}
+                  showSearch
+                  value={selectedModels}
+                />
+              </div>
+              <div className="min-w-0 flex-1 sm:basis-48">
+                <label
+                  className="mb-2 block text-sm font-medium"
+                  htmlFor="debugFilterCredential"
+                >
+                  {debugText('filterCredential')}
+                </label>
+                <Select
+                  allowClear
+                  id="debugFilterCredential"
+                  mode="multiple"
+                  onChange={(value) => {
+                    setSelectedCredentials(getFilterValues(value));
+                    setTracePage(0);
+                  }}
+                  options={credentialOptions}
+                  placeholder={debugText('filterCredentialPlaceholder')}
+                  showSearch
+                  value={selectedCredentials}
+                />
+              </div>
+              <div className="min-w-0 flex-1 sm:basis-48">
+                <label
+                  className="mb-2 block text-sm font-medium"
+                  htmlFor="debugFilterApiKey"
+                >
+                  {debugText('filterApiKey')}
+                </label>
+                <Select
+                  allowClear
+                  id="debugFilterApiKey"
+                  mode="multiple"
+                  onChange={(value) => {
+                    setSelectedRequestKeys(getFilterValues(value));
+                    setTracePage(0);
+                  }}
+                  options={requestKeyOptions}
+                  placeholder={debugText('filterApiKeyPlaceholder')}
+                  showSearch
+                  value={selectedRequestKeys}
+                />
+              </div>
+            </div>
+            {filteredItems.length ? (
+              <>
+                <Collapse
+                  activeKey={openTraceIds}
+                  className="debug-entry w-full min-w-0 max-w-full"
+                  items={displayedTraceItems.map((item) => ({
+                    children: (
+                      <div className="flex w-full min-w-0 flex-col gap-4 pt-1">
+                        {!debug.detailLoadedIds[item.id] ? (
+                          <div className="text-sm text-secondary">
+                            Loading trace detail...
+                          </div>
+                        ) : (
+                          <>
+                            <RawDebugSection
+                              format={getResponseFormat(item.route)}
+                              step={1}
+                              title={debugText('request')}
+                              value={item.requestBody}
+                            />
+                            <StructuredUpstreamRequest
+                              format={getResponseFormat(item.route)}
+                              step={2}
+                              title={debugText('upstreamRequest')}
+                              value={item.upstreamRequest?.body}
+                            />
+                            <StructuredResponse
+                              format={getResponseFormat(item.route)}
+                              step={3}
+                              title={debugText('upstreamResponse')}
+                              value={item.upstreamResponse?.body}
+                            />
+                            <StructuredResponse
+                              format={getResponseFormat(item.route)}
+                              step={4}
+                              title={debugText('response')}
+                              value={item.transformedResponse?.body}
+                            />
+                          </>
+                        )}
                       </div>
-                    ) : (
-                      <>
-                        <RawDebugSection
-                          title={debugText('request')}
-                          value={item.requestBody}
-                        />
-                        <StructuredUpstreamRequest
-                          title={debugText('upstreamRequest')}
-                          value={item.upstreamRequest?.body}
-                        />
-                        <StructuredUpstreamResponse
-                          value={item.upstreamResponse?.body}
-                        />
-                        <RawDebugSection
-                          title={debugText('response')}
-                          value={item.transformedResponse?.body}
-                        />
-                      </>
-                    )}
-                  </div>
-                ),
-                key: item.id,
-                label: (
-                  <div className="flex w-full min-w-0 max-w-full flex-col items-start gap-3 text-left">
-                    <div className="font-medium text-text-light dark:text-text-dark break-words text-left">
-                      {item.route}
-                    </div>
-                    <div className="flex flex-wrap items-start gap-2 text-xs min-w-0 max-w-full">
-                      <Tag
-                        className="debug-credential !px-0 min-w-0 max-w-full whitespace-normal"
-                        variant="borderless"
-                      >
-                        {debugText('credential')}:{' '}
-                        <span className="break-all">
-                          {item.credentialFilename ??
-                            debugText('credentialUnknown')}
-                        </span>
-                      </Tag>
-                      {item.error ? (
-                        <Tag color="red" variant="borderless">
-                          {item.error}
-                        </Tag>
-                      ) : null}
-                    </div>
-                    <div className="flex flex-wrap items-start gap-2 text-xs min-w-0 max-w-full">
-                      <Tag className="!px-0" variant="borderless">
-                        {debugText('upstreamStatus', {
-                          value: item.upstreamResponse?.status ?? '-',
-                        })}
-                      </Tag>
-                      <Tag className="!px-0" variant="borderless">
-                        {debugText('returnedStatus', {
-                          value: item.transformedResponse?.status ?? '-',
-                        })}
-                      </Tag>
-                    </div>
-                    <div className="text-sm text-secondary break-all min-w-0 max-w-full text-left">
-                      {formatCreatedAt(item.createdAt)} · key:{' '}
-                      {item.requestKey ?? debugText('requestKeyNone')}
-                    </div>
-                    <Flexbox
-                      align="flex-start"
-                      className="debug-entry-tags text-xs text-left"
-                      gap={20}
-                      horizontal
-                      width="100%"
-                      wrap="wrap"
+                    ),
+                    key: item.id,
+                    label: (
+                      <div className="flex w-full min-w-0 max-w-full flex-col items-start gap-3 text-left">
+                        <div className="font-medium text-text-light dark:text-text-dark break-words text-left">
+                          {item.route}
+                        </div>
+                        <div className="flex flex-wrap items-start gap-2 text-xs min-w-0 max-w-full">
+                          <Tag
+                            className="debug-credential !px-0 min-w-0 max-w-full whitespace-normal"
+                            variant="borderless"
+                          >
+                            {debugText('credential')}:{' '}
+                            <span className="break-all">
+                              {item.credentialFilename ??
+                                debugText('credentialUnknown')}
+                            </span>
+                          </Tag>
+                          {item.error ? (
+                            <Tag color="red" variant="borderless">
+                              {item.error}
+                            </Tag>
+                          ) : null}
+                        </div>
+                        <div className="flex flex-wrap items-start gap-2 text-xs min-w-0 max-w-full">
+                          <Tag className="!px-0" variant="borderless">
+                            {debugText('upstreamStatus', {
+                              value: item.upstreamResponse?.status ?? '-',
+                            })}
+                          </Tag>
+                          <Tag className="!px-0" variant="borderless">
+                            {debugText('returnedStatus', {
+                              value: item.transformedResponse?.status ?? '-',
+                            })}
+                          </Tag>
+                        </div>
+                        <div className="text-sm text-secondary break-all min-w-0 max-w-full text-left">
+                          {formatCreatedAt(item.createdAt)} · key:{' '}
+                          {item.requestKey
+                            ? formatMaskedRequestKey(item.requestKey)
+                            : debugText('requestKeyNone')}
+                        </div>
+                        <Flexbox
+                          align="flex-start"
+                          className="debug-entry-tags text-xs text-left"
+                          gap={20}
+                          horizontal
+                          width="100%"
+                          wrap="wrap"
+                        >
+                          <DebugMetric
+                            icon={Bot}
+                            label="Model"
+                            value={item.model}
+                          />
+                          <DebugMetric
+                            icon={Database}
+                            label="Input tokens"
+                            value={item.usage?.inputTokens}
+                          />
+                          <DebugMetric
+                            icon={Sparkles}
+                            label="Output tokens"
+                            value={item.usage?.outputTokens}
+                          />
+                          <DebugMetric
+                            icon={Database}
+                            label="Cached tokens"
+                            value={
+                              (item.usage?.cacheReadTokens ?? 0) +
+                              (item.usage?.cacheCreationTokens ?? 0)
+                            }
+                          />
+                          <DebugMetric
+                            icon={Gauge}
+                            label="TPS"
+                            value={
+                              hasDuration(item.elapsedMs) &&
+                              item.elapsedMs > 0 &&
+                              item.usage?.totalTokens
+                                ? Math.round(
+                                    (item.usage.totalTokens * 1_000) /
+                                      item.elapsedMs,
+                                  )
+                                : null
+                            }
+                          />
+                          <DebugMetric
+                            icon={Clock3}
+                            label="Request duration"
+                            value={
+                              hasDuration(item.elapsedMs)
+                                ? formatDuration(item.elapsedMs)
+                                : null
+                            }
+                          />
+                        </Flexbox>
+                      </div>
+                    ),
+                  }))}
+                  onChange={(keys) => {
+                    const nextOpenTraceIds = Array.isArray(keys)
+                      ? keys
+                      : [keys];
+                    setOpenTraceIds(nextOpenTraceIds);
+                    nextOpenTraceIds.forEach((id) => {
+                      if (
+                        !debug.detailLoadedIds[id] &&
+                        !debug.detailLoadingIds[id]
+                      ) {
+                        onLoadDetail?.(id);
+                      }
+                    });
+                  }}
+                  padding={{ body: 16, header: 16 }}
+                  variant="outlined"
+                />
+                {tracePageCount > 1 ? (
+                  <div className="debug-pagination flex flex-wrap items-center gap-2">
+                    <Button
+                      disabled={activeTracePage === 0}
+                      onClick={() => setTracePage(activeTracePage - 1)}
+                      size="small"
                     >
-                      <DebugMetric
-                        icon={Bot}
-                        label="Model"
-                        value={item.model}
-                      />
-                      <DebugMetric
-                        icon={Database}
-                        label="Input tokens"
-                        value={item.usage?.inputTokens}
-                      />
-                      <DebugMetric
-                        icon={Sparkles}
-                        label="Output tokens"
-                        value={item.usage?.outputTokens}
-                      />
-                      <DebugMetric
-                        icon={Database}
-                        label="Cached tokens"
-                        value={
-                          (item.usage?.cacheReadTokens ?? 0) +
-                          (item.usage?.cacheCreationTokens ?? 0)
-                        }
-                      />
-                      <DebugMetric
-                        icon={Gauge}
-                        label="TPS"
-                        value={
-                          hasDuration(item.elapsedMs) &&
-                          item.elapsedMs > 0 &&
-                          item.usage?.totalTokens
-                            ? Math.round(
-                                (item.usage.totalTokens * 1_000) /
-                                  item.elapsedMs,
-                              )
-                            : null
-                        }
-                      />
-                      <DebugMetric
-                        icon={Clock3}
-                        label="Request duration"
-                        value={
-                          hasDuration(item.elapsedMs)
-                            ? formatDuration(item.elapsedMs)
-                            : null
-                        }
-                      />
-                    </Flexbox>
+                      Previous
+                    </Button>
+                    <span className="text-xs text-secondary">
+                      Page {activeTracePage + 1} of {tracePageCount}
+                    </span>
+                    <Button
+                      disabled={activeTracePage === tracePageCount - 1}
+                      onClick={() => setTracePage(activeTracePage + 1)}
+                      size="small"
+                    >
+                      Next
+                    </Button>
                   </div>
-                ),
-              }))}
-              onChange={(keys) => {
-                const nextOpenTraceIds = Array.isArray(keys) ? keys : [keys];
-                setOpenTraceIds(nextOpenTraceIds);
-                nextOpenTraceIds.forEach((id) => {
-                  if (
-                    !debug.detailLoadedIds[id] &&
-                    !debug.detailLoadingIds[id]
-                  ) {
-                    onLoadDetail?.(id);
-                  }
-                });
-              }}
-              padding={{ body: 16, header: 16 }}
-              variant="outlined"
-            />
+                ) : null}
+              </>
+            ) : (
+              <div className="py-8 text-center text-sm text-secondary">
+                {debugText('noMatchingLogs')}
+              </div>
+            )}
           </div>
         ) : (
           <div className="flex items-center justify-center gap-2 py-8 text-secondary">
