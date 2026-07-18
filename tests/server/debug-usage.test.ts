@@ -8,6 +8,7 @@ import {
   enqueueUpstreamResponseSnapshot,
   finalizeDebugTrace,
   getDebugSettings,
+  hasPendingDebugLogWrites,
   isDebugEnabled,
   listDebugLogs,
   setDebugTraceError,
@@ -65,7 +66,7 @@ describe('debug and usage persistence', () => {
     expect(await getDebugSettings()).toEqual({
       autoRefreshSeconds: 0,
       enabled: false,
-      maxEntries: 100,
+      maxEntries: 10,
     });
     expect(await isDebugEnabled()).toBe(false);
 
@@ -74,7 +75,7 @@ describe('debug and usage persistence', () => {
     expect(await getDebugSettings()).toEqual({
       autoRefreshSeconds: 0,
       enabled: false,
-      maxEntries: 100,
+      maxEntries: 10,
     });
 
     writeJson(debugConfigPath, {
@@ -85,7 +86,7 @@ describe('debug and usage persistence', () => {
     expect(await getDebugSettings()).toEqual({
       autoRefreshSeconds: 0,
       enabled: false,
-      maxEntries: 100,
+      maxEntries: 10,
     });
 
     expect(
@@ -109,7 +110,7 @@ describe('debug and usage persistence', () => {
     ).toEqual({
       autoRefreshSeconds: 0,
       enabled: true,
-      maxEntries: 100,
+      maxEntries: 10,
     });
   });
 
@@ -211,6 +212,11 @@ describe('debug and usage persistence', () => {
       body: 'plain response',
       status: 201,
     });
+    expect(entry).toMatchObject({
+      elapsedMs: expect.any(Number),
+      model: null,
+      usage: null,
+    });
 
     finalizeDebugTrace(undefined, new Response('ignored'));
     await clearDebugLogs();
@@ -227,6 +233,230 @@ describe('debug and usage persistence', () => {
       },
     ]);
     expect(await listDebugLogs()).toHaveLength(1);
+  });
+
+  it('keeps pending traces out of reads until the background flush runs', async () => {
+    vi.useFakeTimers();
+    try {
+      await updateDebugSettings({ enabled: true, maxEntries: 10 });
+      const trace = createDebugTrace({
+        requestBody: { model: 'gpt-5.5' },
+        requestKey: null,
+        route: '/v1/responses',
+      });
+
+      enqueueUpstreamResponseSnapshot(
+        trace,
+        Response.json({
+          usage: {
+            input_tokens: 3,
+            output_tokens: 5,
+            prompt_tokens_details: { cached_tokens: 2 },
+          },
+        }),
+      );
+      finalizeDebugTrace(trace, new Response('completed'));
+
+      await vi.runAllTicks();
+      expect(hasPendingDebugLogWrites()).toBe(true);
+      expect(await listDebugLogs()).toEqual([]);
+
+      await vi.runAllTimersAsync();
+      expect(hasPendingDebugLogWrites()).toBe(false);
+      const [entry] = await listDebugLogs();
+      expect(entry).toMatchObject({
+        model: 'gpt-5.5',
+        usage: {
+          cacheCreationTokens: 0,
+          cacheReadTokens: 2,
+          inputTokens: 3,
+          outputTokens: 5,
+          totalTokens: 8,
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('truncates response snapshots while reading the cloned stream', async () => {
+    await updateDebugSettings({ enabled: true, maxEntries: 10 });
+    const trace = createDebugTrace({
+      requestBody: {},
+      requestKey: null,
+      route: '/v1/responses',
+    });
+
+    finalizeDebugTrace(
+      trace,
+      new Response(`${'a'.repeat(200_000)}tail`, {
+        headers: { 'Content-Type': 'text/plain' },
+      }),
+    );
+
+    await vi.waitFor(async () => {
+      expect(await listDebugLogs()).toHaveLength(1);
+    });
+    const [entry] = await listDebugLogs();
+    expect(entry.transformedResponse?.body).toMatch(
+      /^a+\n\.\.\.\[truncated\]$/,
+    );
+    expect(entry.transformedResponse?.body).not.toContain('tail');
+  });
+
+  it('redacts sensitive fields in truncated JSON response snapshots', async () => {
+    await updateDebugSettings({ enabled: true, maxEntries: 10 });
+    const trace = createDebugTrace({
+      requestBody: {},
+      requestKey: null,
+      route: '/v1/responses',
+    });
+
+    finalizeDebugTrace(
+      trace,
+      new Response(
+        JSON.stringify({
+          access_token: 'snapshot-access-token',
+          payload: 'a'.repeat(200_000),
+        }),
+        { headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    await vi.waitFor(async () => {
+      expect(await listDebugLogs()).toHaveLength(1);
+    });
+    const [entry] = await listDebugLogs();
+    const body = String(entry.transformedResponse?.body);
+    expect(body).toContain('[redacted]');
+    expect(body).not.toContain('snapshot-access-token');
+  });
+
+  it('redacts escaped sensitive keys in truncated JSON response snapshots', async () => {
+    await updateDebugSettings({ enabled: true, maxEntries: 10 });
+    const trace = createDebugTrace({
+      requestBody: {},
+      requestKey: null,
+      route: '/v1/responses',
+    });
+
+    finalizeDebugTrace(
+      trace,
+      new Response(
+        `{"access\\u005ftoken":"escaped-snapshot-access-token","payload":"${'a'.repeat(200_000)}"}`,
+        { headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    await vi.waitFor(async () => {
+      expect(await listDebugLogs()).toHaveLength(1);
+    });
+    const [entry] = await listDebugLogs();
+    const body = String(entry.transformedResponse?.body);
+    expect(body).toContain('[redacted]');
+    expect(body).not.toContain('escaped-snapshot-access-token');
+  });
+
+  it('returns the retained entry after flushing a full debug log', async () => {
+    await updateDebugSettings({ enabled: true, maxEntries: 1 });
+    const firstTrace = createDebugTrace({
+      requestBody: { input: 'first' },
+      requestKey: null,
+      route: '/v1/chat/completions',
+    });
+    finalizeDebugTrace(firstTrace, Response.json({ message: 'first' }));
+
+    await vi.waitFor(async () => {
+      expect(await listDebugLogs()).toHaveLength(1);
+    });
+
+    const secondTrace = createDebugTrace({
+      requestBody: { input: 'second' },
+      requestKey: null,
+      route: '/v1/chat/completions',
+    });
+    finalizeDebugTrace(secondTrace, Response.json({ message: 'second' }));
+
+    await vi.waitFor(async () => {
+      const logs = await listDebugLogs();
+      expect(logs).toHaveLength(1);
+      expect(logs[0]?.id).toBe(secondTrace.id);
+    });
+  });
+
+  it('extracts usage from OpenAI streaming response events', async () => {
+    await updateDebugSettings({ enabled: true, maxEntries: 10 });
+    const trace = createDebugTrace({
+      requestBody: { model: 'gpt-5.5' },
+      requestKey: null,
+      route: '/v1/chat/completions',
+    });
+    const stream =
+      'data: {"choices":[{"delta":{"content":"hello"}}]}\n\n' +
+      'data: {"usage":{"prompt_tokens":3,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":2}}}\n\n' +
+      'data: [DONE]\n\n';
+
+    enqueueUpstreamResponseSnapshot(
+      trace,
+      new Response(stream, {
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+    finalizeDebugTrace(
+      trace,
+      new Response(stream, {
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+
+    await vi.waitFor(async () => {
+      expect(await listDebugLogs()).toHaveLength(1);
+    });
+    const [entry] = await listDebugLogs();
+    expect(entry.usage).toEqual({
+      cacheCreationTokens: 0,
+      cacheReadTokens: 2,
+      inputTokens: 3,
+      outputTokens: 5,
+      totalTokens: 8,
+    });
+  });
+
+  it('extracts usage from nested Responses API streaming events', async () => {
+    await updateDebugSettings({ enabled: true, maxEntries: 10 });
+    const trace = createDebugTrace({
+      requestBody: { model: 'gpt-5.5' },
+      requestKey: null,
+      route: '/v1/responses',
+    });
+    const stream =
+      'data: {"type":"response.completed","response":{"usage":{"input_tokens":3,"output_tokens":5,"cache_read_input_tokens":2}}}\n\n' +
+      'data: [DONE]\n\n';
+
+    enqueueUpstreamResponseSnapshot(
+      trace,
+      new Response(stream, {
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+    finalizeDebugTrace(
+      trace,
+      new Response(stream, {
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+
+    await vi.waitFor(async () => {
+      expect(await listDebugLogs()).toHaveLength(1);
+    });
+    const [entry] = await listDebugLogs();
+    expect(entry.usage).toEqual({
+      cacheCreationTokens: 0,
+      cacheReadTokens: 2,
+      inputTokens: 3,
+      outputTokens: 5,
+      totalTokens: 10,
+    });
   });
 
   it('serializes concurrent debug and usage persistence', async () => {

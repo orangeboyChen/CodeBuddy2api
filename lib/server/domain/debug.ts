@@ -13,14 +13,25 @@ import {
 export interface DebugLogEntry {
   credentialFilename: string | null;
   createdAt: string;
+  elapsedMs: number;
   error: string | null;
   id: string;
+  model: string | null;
   requestBody: unknown;
   requestKey: string | null;
   route: string;
   transformedResponse: DebugHttpSnapshot | null;
   upstreamRequest: DebugUpstreamRequest | null;
   upstreamResponse: DebugHttpSnapshot | null;
+  usage: DebugUsageMetrics | null;
+}
+
+export interface DebugUsageMetrics {
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
 }
 
 export interface DebugHttpSnapshot {
@@ -44,6 +55,7 @@ export interface DebugTrace {
   requestBody: unknown;
   requestKey: string | null;
   route: string;
+  startedAtMs: number;
   transformedResponse: DebugHttpSnapshot | null;
   upstreamRequest: DebugUpstreamRequest | null;
   upstreamResponse: DebugHttpSnapshot | null;
@@ -65,7 +77,7 @@ export interface DebugUpstreamRequest {
 const DEFAULT_DEBUG_SETTINGS: DebugSettings = {
   autoRefreshSeconds: 0,
   enabled: false,
-  maxEntries: 100,
+  maxEntries: 10,
 };
 
 const MAX_SNAPSHOT_TEXT_LENGTH = 200_000;
@@ -74,6 +86,8 @@ const MAX_PENDING_LOGS = 100;
 const REDACTED_VALUE = '[redacted]';
 let debugWriteQueue: Promise<void> = Promise.resolve();
 let pendingDebugLogs: DebugLogEntry[] = [];
+let pendingDebugFlushes = 0;
+let pendingDebugTraces = 0;
 let debugFlushTimer: ReturnType<typeof setTimeout> | null = null;
 const SENSITIVE_HEADER_NAMES = new Set([
   'authorization',
@@ -102,6 +116,8 @@ const SENSITIVE_FIELD_NAMES = new Set([
   'x-user-id',
   'x_user_id',
 ]);
+const JSON_STRING_PROPERTY_PATTERN =
+  /("(?:\\.|[^"\\])*")(\s*:\s*)("(?:\\.|[^"\\])*(?:"|$))/g;
 
 const enqueueDebugWrite = async <T>(mutation: () => Promise<T>): Promise<T> => {
   const operation = debugWriteQueue.then(mutation, mutation);
@@ -206,6 +222,23 @@ const truncateString = (value: string): string => {
   return `${value.slice(0, MAX_SNAPSHOT_TEXT_LENGTH)}\n...[truncated]`;
 };
 
+const redactSensitiveJsonFields = (value: string): string => {
+  return value.replace(
+    JSON_STRING_PROPERTY_PATTERN,
+    (match, serializedKey: string, separator: string) => {
+      try {
+        const key = JSON.parse(serializedKey) as unknown;
+
+        return typeof key === 'string' && isSensitiveFieldName(key)
+          ? `${serializedKey}${separator}${JSON.stringify(REDACTED_VALUE)}`
+          : match;
+      } catch {
+        return match;
+      }
+    },
+  );
+};
+
 const tryParseBody = (
   text: string,
   contentType: string,
@@ -222,7 +255,7 @@ const tryParseBody = (
         JSON.parse(trimmed) as Record<string, unknown> | unknown[],
       ) as Record<string, unknown> | unknown[];
     } catch {
-      return truncateString(trimmed);
+      return redactSensitiveJsonFields(trimmed);
     }
   }
 
@@ -331,9 +364,20 @@ const readDebugLogs = async (): Promise<DebugLogEntry[]> => {
 };
 
 export const listDebugLogs = async (): Promise<DebugLogEntry[]> => {
-  await flushPendingDebugLogs();
+  while (pendingDebugLogs.length) {
+    await flushPendingDebugLogs();
+  }
   await debugWriteQueue;
   return readDebugLogs();
+};
+
+export const hasPendingDebugLogWrites = (): boolean => {
+  return Boolean(
+    pendingDebugLogs.length ||
+    debugFlushTimer ||
+    pendingDebugFlushes ||
+    pendingDebugTraces,
+  );
 };
 
 export const clearDebugLogs = async (): Promise<void> => {
@@ -376,6 +420,7 @@ export const createDebugTrace = ({
         ? maskSensitiveString(requestKey)
         : requestKey,
     route,
+    startedAtMs: Date.now(),
     transformedResponse: null,
     upstreamRequest: null,
     upstreamResponse: null,
@@ -424,13 +469,166 @@ const captureResponseSnapshot = async (
   response: Response,
 ): Promise<DebugHttpSnapshot> => {
   const clone = response.clone();
-  const text = await clone.text();
   const contentType = clone.headers.get('content-type') ?? '';
+  const text = await readSnapshotText(clone);
 
   return {
     body: tryParseBody(text, contentType),
     headers: toHeadersRecord(clone.headers),
     status: clone.status,
+  };
+};
+
+const readSnapshotText = async (response: Response): Promise<string> => {
+  if (!response.body) {
+    return '';
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  let capturedLength = 0;
+  let truncated = false;
+
+  try {
+    while (capturedLength < MAX_SNAPSHOT_TEXT_LENGTH) {
+      const chunk = await reader.read();
+
+      if (chunk.done) {
+        text += decoder.decode();
+        break;
+      }
+
+      const remaining = MAX_SNAPSHOT_TEXT_LENGTH - capturedLength;
+      const decoded = decoder.decode(chunk.value, { stream: true });
+
+      if (decoded.length <= remaining) {
+        text += decoded;
+        capturedLength += decoded.length;
+        continue;
+      }
+
+      text += decoded.slice(0, remaining);
+      truncated = true;
+      break;
+    }
+
+    if (capturedLength >= MAX_SNAPSHOT_TEXT_LENGTH) {
+      truncated = true;
+    }
+  } finally {
+    if (truncated) {
+      void reader.cancel().catch(() => undefined);
+    }
+    reader.releaseLock();
+  }
+
+  return truncated ? `${text}\n...[truncated]` : text;
+};
+
+const asRecord = (value: unknown): Record<string, unknown> | null => {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+};
+
+const toTokenCount = (value: unknown): number => {
+  const numeric =
+    typeof value === 'number' ? value : Number.parseFloat(String(value ?? ''));
+
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : 0;
+};
+
+const getTraceModel = (trace: DebugTrace): string | null => {
+  const upstreamBody = asRecord(trace.upstreamRequest?.body);
+  const requestBody = asRecord(trace.requestBody);
+  const model = upstreamBody?.model ?? requestBody?.model;
+
+  return typeof model === 'string' && model.trim() ? model.trim() : null;
+};
+
+const getResponseRecord = (body: unknown): Record<string, unknown> | null => {
+  const record = asRecord(body);
+
+  if (record) {
+    return record;
+  }
+
+  if (typeof body !== 'string') {
+    return null;
+  }
+
+  const events = body
+    .split(/\r?\n\r?\n/)
+    .map((event) =>
+      event
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice('data:'.length).trim())
+        .join('\n'),
+    )
+    .filter(Boolean);
+
+  for (const event of events.reverse()) {
+    try {
+      const parsed = asRecord(JSON.parse(event) as unknown);
+      if (getResponseUsage(parsed)) {
+        return parsed;
+      }
+    } catch {
+      // Ignore non-JSON SSE sentinels such as [DONE].
+    }
+  }
+
+  try {
+    return asRecord(JSON.parse(body) as unknown);
+  } catch {
+    return null;
+  }
+};
+
+const getResponseUsage = (
+  response: Record<string, unknown> | null,
+): Record<string, unknown> | null => {
+  return (
+    asRecord(asRecord(response?.response)?.usage) ?? asRecord(response?.usage)
+  );
+};
+
+const getTraceUsage = (trace: DebugTrace): DebugUsageMetrics | null => {
+  const responseBody =
+    getResponseRecord(trace.transformedResponse?.body) ??
+    getResponseRecord(trace.upstreamResponse?.body);
+  const usage = getResponseUsage(responseBody);
+
+  if (!usage) {
+    return null;
+  }
+
+  const inputTokens = toTokenCount(usage.input_tokens ?? usage.prompt_tokens);
+  const outputTokens = toTokenCount(
+    usage.output_tokens ?? usage.completion_tokens,
+  );
+  const promptTokenDetails = asRecord(usage.prompt_tokens_details);
+  const cacheReadTokens = toTokenCount(
+    usage.cache_read_input_tokens ?? promptTokenDetails?.cached_tokens,
+  );
+  const cacheCreationTokens = toTokenCount(
+    usage.cache_creation_input_tokens ??
+      promptTokenDetails?.cache_creation_tokens,
+  );
+  const totalTokens =
+    toTokenCount(usage.total_tokens) ||
+    inputTokens +
+      outputTokens +
+      (promptTokenDetails ? 0 : cacheReadTokens + cacheCreationTokens);
+
+  return {
+    cacheCreationTokens,
+    cacheReadTokens,
+    inputTokens,
+    outputTokens,
+    totalTokens,
   };
 };
 
@@ -472,7 +670,12 @@ const flushPendingDebugLogs = async (): Promise<void> => {
 
   const entries = pendingDebugLogs.splice(0, MAX_PENDING_LOGS);
 
-  if (!entries.length) return;
+  if (!entries.length) {
+    await debugWriteQueue;
+    return;
+  }
+
+  pendingDebugFlushes += 1;
 
   try {
     await enqueueDebugWrite(async () => {
@@ -506,6 +709,8 @@ const flushPendingDebugLogs = async (): Promise<void> => {
     pendingDebugLogs = [...entries, ...pendingDebugLogs];
     scheduleDebugFlush();
     throw error;
+  } finally {
+    pendingDebugFlushes -= 1;
   }
 };
 
@@ -525,6 +730,8 @@ export const finalizeDebugTrace = (
     return;
   }
 
+  pendingDebugTraces += 1;
+
   trace.pending.push(
     captureResponseSnapshot(response)
       .then((snapshot) => {
@@ -540,17 +747,22 @@ export const finalizeDebugTrace = (
       setDebugTraceError(trace, error);
     })
     .finally(() => {
+      const elapsedMs = Math.max(0, Date.now() - trace.startedAtMs);
       void appendDebugLog({
         credentialFilename: trace.credentialFilename,
         createdAt: trace.createdAt,
+        elapsedMs,
         error: trace.error,
         id: trace.id,
+        model: getTraceModel(trace),
         requestBody: trace.requestBody,
         requestKey: trace.requestKey,
         route: trace.route,
         transformedResponse: trace.transformedResponse,
         upstreamRequest: trace.upstreamRequest,
         upstreamResponse: trace.upstreamResponse,
+        usage: getTraceUsage(trace),
       });
+      pendingDebugTraces -= 1;
     });
 };

@@ -171,6 +171,11 @@ interface DebugResponse {
   items?: DebugLogEntry[];
   maxEntries?: number;
   message?: string;
+  pending?: boolean;
+}
+
+interface DebugDetailResponse {
+  item?: DebugLogEntry | null;
 }
 
 interface ApiTestSuccess {
@@ -638,23 +643,88 @@ const AdminPageLayoutContent = ({
         return;
       }
 
+      setDebug((current) => {
+        const nextItems = result.data?.items ?? current.items;
+        const currentItems = new Map(
+          current.items.map((item) => [item.id, item]),
+        );
+        const activeIds = new Set(nextItems.map((item) => item.id));
+        const keepDetailState = (ids: Record<string, boolean>) => {
+          return Object.fromEntries(
+            Object.entries(ids).filter(([id]) => activeIds.has(id)),
+          );
+        };
+
+        return {
+          autoRefreshSeconds: preserveSettings
+            ? current.autoRefreshSeconds
+            : typeof result.data?.autoRefreshSeconds === 'number'
+              ? result.data.autoRefreshSeconds
+              : 0,
+          detailLoadedIds: keepDetailState(current.detailLoadedIds),
+          detailLoadingIds: keepDetailState(current.detailLoadingIds),
+          enabled: preserveSettings
+            ? current.enabled
+            : Boolean(result.data?.enabled),
+          items: nextItems.map((item) => {
+            const previous = currentItems.get(item.id);
+            return current.detailLoadedIds[item.id] && previous
+              ? {
+                  ...item,
+                  requestBody: previous.requestBody,
+                  transformedResponse: previous.transformedResponse,
+                  upstreamRequest: previous.upstreamRequest,
+                  upstreamResponse: previous.upstreamResponse,
+                }
+              : item;
+          }),
+          loading: false,
+          maxEntries: preserveSettings
+            ? current.maxEntries
+            : typeof result.data?.maxEntries === 'number'
+              ? result.data.maxEntries
+              : 100,
+          saving: false,
+        };
+      });
+    },
+    [consoleMessages.debugLoadFailed, setDebug, showNotification],
+  );
+
+  const loadDebugDetail = useCallback(
+    async (id: string) => {
       setDebug((current) => ({
-        autoRefreshSeconds: preserveSettings
-          ? current.autoRefreshSeconds
-          : typeof result.data?.autoRefreshSeconds === 'number'
-            ? result.data.autoRefreshSeconds
-            : 0,
-        enabled: preserveSettings
-          ? current.enabled
-          : Boolean(result.data?.enabled),
-        items: result.data?.items ?? [],
-        loading: false,
-        maxEntries: preserveSettings
-          ? current.maxEntries
-          : typeof result.data?.maxEntries === 'number'
-            ? result.data.maxEntries
-            : 100,
-        saving: false,
+        ...current,
+        detailLoadingIds: { ...current.detailLoadingIds, [id]: true },
+      }));
+      const result = await requestJson<DebugDetailResponse>(
+        `/admin-api/debug?id=${encodeURIComponent(id)}`,
+      );
+
+      if (!result.ok || !result.data?.item) {
+        setDebug((current) => {
+          const { [id]: _loading, ...detailLoadingIds } =
+            current.detailLoadingIds;
+          return { ...current, detailLoadingIds };
+        });
+        showNotification(
+          'error',
+          getErrorMessage(result.data, consoleMessages.debugLoadFailed),
+        );
+        return;
+      }
+
+      const detail = result.data.item;
+
+      setDebug((current) => ({
+        ...current,
+        detailLoadedIds: { ...current.detailLoadedIds, [id]: true },
+        detailLoadingIds: Object.fromEntries(
+          Object.entries(current.detailLoadingIds).filter(
+            ([loadingId]) => loadingId !== id,
+          ),
+        ),
+        items: current.items.map((item) => (item.id === id ? detail : item)),
       }));
     },
     [consoleMessages.debugLoadFailed, setDebug, showNotification],
@@ -1375,7 +1445,9 @@ const AdminPageLayoutContent = ({
           ? result.data.autoRefreshSeconds
           : debug.autoRefreshSeconds,
       enabled: Boolean(result.data?.enabled),
-      items: result.data?.items ?? [],
+      detailLoadedIds: debug.detailLoadedIds,
+      detailLoadingIds: debug.detailLoadingIds,
+      items: result.data?.items ?? debug.items,
       loading: false,
       maxEntries:
         typeof result.data?.maxEntries === 'number'
@@ -1448,6 +1520,12 @@ const AdminPageLayoutContent = ({
     loadSettings,
     loadUsage,
   ]);
+
+  useEffect(() => {
+    if (activeTab === 'debug' && debug.loading) {
+      void loadDebug();
+    }
+  }, [activeTab, debug.loading, loadDebug]);
 
   useEffect(() => {
     const applyTheme = () => {
@@ -1882,6 +1960,9 @@ const AdminPageLayoutContent = ({
                 },
                 onEnabledChange: (value) => {
                   setDebug((current) => ({ ...current, enabled: value }));
+                },
+                onLoadDetail: (id) => {
+                  void loadDebugDetail(id);
                 },
                 onMaxEntriesChange: (value) => {
                   setDebug((current) => ({
