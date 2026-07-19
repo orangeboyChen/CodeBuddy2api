@@ -101,6 +101,77 @@ describe('debug and usage persistence', () => {
 
     expect(shortTrace.requestKey).toBe('****');
     expect(shortTrace.requestBody).toMatchObject({ api_key: '****' });
+
+    expect(
+      createDebugTrace({
+        requestBody: {},
+        requestKey: 'Bearer abc',
+        route: '/v1/chat/completions',
+      }).requestKey,
+    ).toBe('****');
+  });
+
+  it('captures terminal upstream stream states without delaying the response', async () => {
+    const consumeSnapshot = async (response: Response): Promise<DebugTrace> => {
+      const trace = createDebugTrace({
+        requestBody: {},
+        requestKey: null,
+        route: '/v1/chat/completions',
+      });
+      await enqueueUpstreamResponseSnapshot(trace, response).text();
+      await Promise.all(trace.pending);
+      return trace;
+    };
+
+    const truncated = await consumeSnapshot(
+      new Response(`${'a'.repeat(200_000)}tail`),
+    );
+    expect(truncated.upstreamResponse?.body).toMatch(
+      /^a+\n\.\.\.\[truncated\]$/,
+    );
+
+    const empty = await consumeSnapshot(new Response(null));
+    expect(empty.upstreamResponse?.body).toBe('');
+
+    const cancellableTrace = createDebugTrace({
+      requestBody: {},
+      requestKey: null,
+      route: '/v1/chat/completions',
+    });
+    const cancellable = enqueueUpstreamResponseSnapshot(
+      cancellableTrace,
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('partial'));
+          },
+        }),
+      ),
+    );
+    const cancellableReader = cancellable.body?.getReader();
+    await cancellableReader?.read();
+    await cancellableReader?.cancel();
+    await Promise.all(cancellableTrace.pending);
+    expect(cancellableTrace.upstreamResponse?.body).toBe('partial');
+
+    const errorTrace = createDebugTrace({
+      requestBody: {},
+      requestKey: null,
+      route: '/v1/chat/completions',
+    });
+    const failing = enqueueUpstreamResponseSnapshot(
+      errorTrace,
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull() {
+            throw new Error('upstream stream failure');
+          },
+        }),
+      ),
+    );
+    await expect(failing.text()).rejects.toThrow('upstream stream failure');
+    await Promise.all(errorTrace.pending);
+    expect(errorTrace.upstreamResponse?.body).toBe('');
   });
 
   it('normalizes debug settings and handles invalid persisted files', async () => {
@@ -715,6 +786,21 @@ describe('debug and usage persistence', () => {
         totalTokens: 23,
       },
     ]);
+
+    expect(
+      (
+        await getUsageAnalytics({
+          accessKey: accessKey.access_key.id,
+          credential: 'missing-credential.json',
+          now,
+          range: 'today',
+        })
+      ).rangeSummary,
+    ).toEqual({
+      cacheHitTokens: 0,
+      callCount: 0,
+      totalTokens: 0,
+    });
 
     expect(
       (
