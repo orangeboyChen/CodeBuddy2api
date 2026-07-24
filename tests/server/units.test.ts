@@ -51,7 +51,10 @@ import {
   updateCredentialSupportedModels,
   updateCredentialByIndex,
 } from '@/lib/server/domain/credentials';
-import { refreshMissingCredentialModels } from '@/lib/server/domain/credential-models';
+import {
+  refreshCredentialModels,
+  refreshMissingCredentialModels,
+} from '@/lib/server/domain/credential-models';
 import {
   handleResponsesRequest,
   resetResponseSessions,
@@ -625,6 +628,27 @@ describe('server units', () => {
     expect(refreshedModels).toContain(undefined);
 
     delete refreshState.__codebuddy2apiCredentialModelRefresh__;
+  });
+
+  it('persists models after a credential is saved', async () => {
+    const saved = await addCredential({ bearer_token: 'refresh-token' });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      makeJsonResponse({
+        code: 0,
+        data: {
+          agents: [{ models: ['glm-5.1'], name: 'cli' }],
+          models: [{ id: 'glm-5.1', name: 'GLM 5.1' }],
+        },
+      }),
+    );
+
+    await refreshCredentialModels(saved.filename);
+
+    expect(
+      (await readCredentialRecords()).find(
+        (credential) => credential.filename === saved.filename,
+      )?.data.supported_models,
+    ).toBe('glm-5.1');
   });
 
   it('does not block startup when credential model refresh cannot read storage', async () => {
