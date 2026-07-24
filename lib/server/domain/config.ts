@@ -175,6 +175,10 @@ export const getCodeBuddyApiEndpoint = async (): Promise<string> => {
 export const getDefaultModel = async (
   fallback = 'glm-5.1',
 ): Promise<string> => {
+  if (fallback !== 'glm-5.1') {
+    return fallback;
+  }
+
   const credentials = await listEligibleCredentialRecords();
 
   return (
